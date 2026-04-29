@@ -2731,7 +2731,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 454769883}
         m_TargetAssemblyTypeName: UIManage, Assembly-CSharp
-        m_MethodName: StartAR
+        m_MethodName: OpenRoomSelector
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}

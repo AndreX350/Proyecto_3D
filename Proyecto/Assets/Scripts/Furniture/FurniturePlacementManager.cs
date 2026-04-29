@@ -5,13 +5,19 @@ public class FurniturePlacementManager : MonoBehaviour
 {
     [Header("Placement")]
     [SerializeField]
-    private Transform spawnPoint;
+    private Transform spawnPoint = null;
 
     [SerializeField]
-    private Vector3 fallbackSpawnPosition = new Vector3(0f, 0f, 0.8f);
+    private Vector3 fallbackSpawnPosition = new Vector3(-1.2f, 0f, 0.2f);
 
     [SerializeField]
-    private float placementSpacing = 0.8f;
+    private float placementSpacing = 1.1f;
+
+    [SerializeField]
+    private int placementsPerRow = 4;
+
+    [SerializeField]
+    private float rowSpacing = 1.1f;
 
     [Header("Runtime")]
     [SerializeField]
@@ -59,6 +65,7 @@ public class FurniturePlacementManager : MonoBehaviour
         GameObject instance = Instantiate(item.prefab, position, Quaternion.identity);
         instance.name = "Placed_" + item.itemName;
         instance.transform.localScale = item.defaultScale;
+        instance.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
 
         placedFurniture.Add(instance);
         lastPlacedFurniture = instance;
@@ -75,6 +82,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         lastPlacedFurniture.transform.Rotate(0f, 45f, 0f);
+        Debug.Log("Rotated furniture: " + lastPlacedFurniture.name);
     }
 
     public void ClearPlacedFurniture()
@@ -96,8 +104,30 @@ public class FurniturePlacementManager : MonoBehaviour
     private Vector3 GetNextPlacementPosition()
     {
         Vector3 basePosition = spawnPoint != null ? spawnPoint.position : fallbackSpawnPosition;
-        Vector3 offset = new Vector3(placedFurniture.Count * placementSpacing, 0f, 0f);
+        int safePlacementsPerRow = Mathf.Max(1, placementsPerRow);
+        int activeCount = CountActivePlacedFurniture();
+        int column = activeCount % safePlacementsPerRow;
+        int row = activeCount / safePlacementsPerRow;
+        Vector3 offset = new Vector3(column * placementSpacing, 0f, row * rowSpacing);
 
         return basePosition + offset;
+    }
+
+    private int CountActivePlacedFurniture()
+    {
+        int count = 0;
+
+        for (int i = placedFurniture.Count - 1; i >= 0; i--)
+        {
+            if (placedFurniture[i] == null)
+            {
+                placedFurniture.RemoveAt(i);
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
     }
 }
