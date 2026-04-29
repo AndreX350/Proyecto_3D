@@ -60,7 +60,10 @@ public class UIARMAnager : MonoBehaviour
 
     public void ClearScene()
     {
-        Debug.Log("Limpiar escena");
+        if (placementManager != null)
+        {
+            placementManager.ClearPlacedFurniture();
+        }
         ClosePanels();
     }
 
