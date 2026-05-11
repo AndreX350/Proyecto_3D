@@ -167,19 +167,46 @@ public class UIARMAnager : MonoBehaviour
 
     private void EnsureRotateButton()
     {
-        if (bottomButtonsContainer == null || placementManager == null)
+        if (placementManager == null)
         {
             return;
         }
 
-        if (bottomButtonsContainer.Find("BtnRotate") != null)
+        Button rotateButton = FindRotateButton();
+
+        if (rotateButton == null)
         {
-            return;
+            if (bottomButtonsContainer == null)
+            {
+                return;
+            }
+
+            rotateButton = CreateTextButton(bottomButtonsContainer, "ROTAR");
+            rotateButton.name = "BtnRotate";
         }
 
-        Button rotateButton = CreateTextButton(bottomButtonsContainer, "ROTAR");
-        rotateButton.name = "BtnRotate";
+        rotateButton.onClick.RemoveListener(RotateLastFurniture);
         rotateButton.onClick.AddListener(RotateLastFurniture);
+    }
+
+    private Button FindRotateButton()
+    {
+        if (bottomButtonsContainer != null)
+        {
+            Transform rotateTransform = bottomButtonsContainer.Find("BtnRotate");
+            if (rotateTransform != null)
+            {
+                return rotateTransform.GetComponent<Button>();
+            }
+        }
+
+        GameObject rotateObject = GameObject.Find("BtnRotate");
+        if (rotateObject != null)
+        {
+            return rotateObject.GetComponent<Button>();
+        }
+
+        return null;
     }
 
     private void BuildFurniturePanel()
