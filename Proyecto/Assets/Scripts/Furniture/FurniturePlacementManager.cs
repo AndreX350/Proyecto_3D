@@ -25,6 +25,7 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private readonly List<GameObject> placedFurniture = new List<GameObject>();
     private GameObject lastPlacedFurniture;
+    public IReadOnlyList<GameObject> PlacedFurniture => placedFurniture;
 
     public void SelectFurniture(FurnitureItemData item)
     {

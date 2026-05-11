@@ -17,6 +17,9 @@ public class UIARMAnager : MonoBehaviour
     [SerializeField]
     private RoomColorManager roomColorManager;
 
+    [SerializeField]
+    private DesignSaveManager designSaveManager;
+
     private const float PanelGap = 12f;
     private float panelBottomOffset = 248f;
     private Transform bottomButtonsContainer;
@@ -69,7 +72,23 @@ public class UIARMAnager : MonoBehaviour
 
     public void SaveDesign()
     {
-        Debug.Log("Guardar diseno");
+        if (placementManager == null)
+        {
+            Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager para guardar.");
+            return;
+        }
+
+        if (designSaveManager == null)
+        {
+            designSaveManager = FindObjectOfType<DesignSaveManager>();
+        }
+
+        if (designSaveManager == null)
+        {
+            designSaveManager = gameObject.AddComponent<DesignSaveManager>();
+        }
+
+        designSaveManager.SaveDesign(placementManager.PlacedFurniture);
         ClosePanels();
     }
 
@@ -122,6 +141,11 @@ public class UIARMAnager : MonoBehaviour
         if (roomColorManager == null)
         {
             roomColorManager = gameObject.AddComponent<RoomColorManager>();
+        }
+
+        if (designSaveManager == null)
+        {
+            designSaveManager = FindObjectOfType<DesignSaveManager>();
         }
     }
 
@@ -249,7 +273,7 @@ public class UIARMAnager : MonoBehaviour
             return;
         }
 
-        PreparePanel(panelColors, 130f, new Vector2(72f, 72f));
+        PreparePanel(panelColors, 130f, new Vector2(60f, 60f));
         ClearPanelChildren(panelColors.transform);
 
         foreach (Color color in wallColors)

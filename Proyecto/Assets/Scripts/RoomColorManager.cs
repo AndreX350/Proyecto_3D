@@ -5,6 +5,12 @@ public class RoomColorManager : MonoBehaviour
 {
     [SerializeField]
     private List<Renderer> wallRenderers = new List<Renderer>();
+    private static readonly HashSet<string> AllowedWallNames = new HashSet<string>
+    {
+        "wall_back",
+        "wall_left",
+        "wall_right"
+    };
 
     private void Awake()
     {
@@ -52,7 +58,9 @@ public class RoomColorManager : MonoBehaviour
         foreach (Renderer sceneRenderer in renderers)
         {
             string objectName = sceneRenderer.gameObject.name.ToLowerInvariant();
-            if (objectName.Contains("wall") || objectName.Contains("pared"))
+            bool looksLikeWall = objectName.Contains("wall") || objectName.Contains("pared");
+            bool isAllowedWall = AllowedWallNames.Contains(objectName);
+            if (looksLikeWall && isAllowedWall)
             {
                 wallRenderers.Add(sceneRenderer);
             }
