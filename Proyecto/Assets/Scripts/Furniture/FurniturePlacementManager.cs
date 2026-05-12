@@ -63,15 +63,37 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         Vector3 position = GetNextPlacementPosition() + item.placementOffset;
-        GameObject instance = Instantiate(item.prefab, position, Quaternion.identity);
+        AddFurnitureInstance(item, position, Quaternion.Euler(0f, 180f, 0f), item.defaultScale);
+
+        Debug.Log("Placed furniture: " + item.itemName);
+    }
+
+    public void PlaceLoadedFurniture(FurnitureItemData item, Vector3 position, float rotY, float scale)
+    {
+        if (item == null)
+        {
+            Debug.LogWarning("FurniturePlacementManager: loaded item is null.");
+            return;
+        }
+
+        if (item.prefab == null)
+        {
+            Debug.LogWarning("FurniturePlacementManager: loaded item has no prefab: " + item.itemName);
+            return;
+        }
+
+        float safeScale = scale > 0f ? scale : item.defaultScale.x;
+        AddFurnitureInstance(item, position, Quaternion.Euler(0f, rotY, 0f), Vector3.one * safeScale);
+    }
+
+    private void AddFurnitureInstance(FurnitureItemData item, Vector3 position, Quaternion rotation, Vector3 scale)
+    {
+        GameObject instance = Instantiate(item.prefab, position, rotation);
         instance.name = "Placed_" + item.itemName;
-        instance.transform.localScale = item.defaultScale;
-        instance.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+        instance.transform.localScale = scale;
 
         placedFurniture.Add(instance);
         lastPlacedFurniture = instance;
-
-        Debug.Log("Placed furniture: " + item.itemName);
     }
 
     public void RotateLastFurniture()

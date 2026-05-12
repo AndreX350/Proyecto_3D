@@ -43,6 +43,7 @@ public class UIARMAnager : MonoBehaviour
         BuildFurniturePanel();
         BuildColorPanel();
         ClosePanels();
+        DesignSaveManager.TryLoadPendingRoomDemoDesign(furnitureCatalog, placementManager, roomColorManager);
     }
 
     public void OpenColors()
@@ -88,7 +89,7 @@ public class UIARMAnager : MonoBehaviour
             designSaveManager = gameObject.AddComponent<DesignSaveManager>();
         }
 
-        designSaveManager.SaveDesign(placementManager.PlacedFurniture);
+        designSaveManager.SaveDesign(placementManager.PlacedFurniture, roomColorManager);
         ClosePanels();
     }
 

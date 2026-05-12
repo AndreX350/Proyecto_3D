@@ -34,6 +34,7 @@ public class UIManage : MonoBehaviour
     public void OpenSaved()
     {
         Debug.Log("Abrir guardados");
+        SceneManager.LoadScene("SavedDesgins");
     }
 
     public void OpenOptions()

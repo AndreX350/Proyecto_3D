@@ -4,6 +4,13 @@ using System.Collections.Generic;
 [Serializable]
 public class DesignSaveData
 {
+    public string savedAt;
+    public string sourceScene;
+    public bool hasWallColor;
+    public float wallColorR;
+    public float wallColorG;
+    public float wallColorB;
+    public float wallColorA;
     public List<PlacedFurnitureData> items = new List<PlacedFurnitureData>();
 }
 
