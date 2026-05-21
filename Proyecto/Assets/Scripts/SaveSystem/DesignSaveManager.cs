@@ -10,8 +10,10 @@ public class DesignSaveManager : MonoBehaviour
 
     private const string FileExtension = ".json";
     private const string RoomDemoSceneName = "RoomDemo";
+    private const string ARSceneName = "ARScene";
 
     private static string pendingRoomDemoLoadPath;
+    private static string pendingARSceneLoadPath;
 
     public string SaveDirectory => Application.persistentDataPath;
 
@@ -108,6 +110,18 @@ public class DesignSaveManager : MonoBehaviour
         SceneManager.LoadScene(RoomDemoSceneName);
     }
 
+    public static void LoadARDesign(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+        {
+            Debug.LogWarning("DesignSaveManager: no se encontro el guardado " + filePath);
+            return;
+        }
+
+        pendingARSceneLoadPath = filePath;
+        SceneManager.LoadScene(ARSceneName);
+    }
+
     public static void TryLoadPendingRoomDemoDesign(
         FurnitureCatalog catalog,
         FurniturePlacementManager placementManager,
@@ -120,6 +134,22 @@ public class DesignSaveManager : MonoBehaviour
 
         string filePath = pendingRoomDemoLoadPath;
         pendingRoomDemoLoadPath = null;
+
+        LoadDesignIntoScene(filePath, catalog, placementManager, roomColorManager);
+    }
+
+    public static void TryLoadPendingARDesign(
+        FurnitureCatalog catalog,
+        FurniturePlacementManager placementManager,
+        RoomColorManager roomColorManager)
+    {
+        if (string.IsNullOrEmpty(pendingARSceneLoadPath))
+        {
+            return;
+        }
+
+        string filePath = pendingARSceneLoadPath;
+        pendingARSceneLoadPath = null;
 
         LoadDesignIntoScene(filePath, catalog, placementManager, roomColorManager);
     }

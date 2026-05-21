@@ -40,10 +40,12 @@ public class UIARMAnager : MonoBehaviour
         ResolveBottomMenuLayout();
         EnsureRuntimePanels();
         EnsureRotateButton();
+        EnsureDeleteButton();
         BuildFurniturePanel();
         BuildColorPanel();
         ClosePanels();
         DesignSaveManager.TryLoadPendingRoomDemoDesign(furnitureCatalog, placementManager, roomColorManager);
+        DesignSaveManager.TryLoadPendingARDesign(furnitureCatalog, placementManager, roomColorManager);
     }
 
     public void OpenColors()
@@ -102,6 +104,18 @@ public class UIARMAnager : MonoBehaviour
         }
 
         placementManager.RotateLastFurniture();
+        ClosePanels();
+    }
+
+    public void DeleteSelectedFurniture()
+    {
+        if (placementManager == null)
+        {
+            Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
+            return;
+        }
+
+        placementManager.DeleteSelectedFurniture();
         ClosePanels();
     }
 
@@ -214,6 +228,30 @@ public class UIARMAnager : MonoBehaviour
         rotateButton.onClick.AddListener(RotateLastFurniture);
     }
 
+    private void EnsureDeleteButton()
+    {
+        if (placementManager == null)
+        {
+            return;
+        }
+
+        Button deleteButton = FindButtonByName("BtnDelete");
+
+        if (deleteButton == null)
+        {
+            if (bottomButtonsContainer == null)
+            {
+                return;
+            }
+
+            deleteButton = CreateTextButton(bottomButtonsContainer, "BORRAR");
+            deleteButton.name = "BtnDelete";
+        }
+
+        deleteButton.onClick.RemoveListener(DeleteSelectedFurniture);
+        deleteButton.onClick.AddListener(DeleteSelectedFurniture);
+    }
+
     private Button FindRotateButton()
     {
         if (bottomButtonsContainer != null)
@@ -229,6 +267,26 @@ public class UIARMAnager : MonoBehaviour
         if (rotateObject != null)
         {
             return rotateObject.GetComponent<Button>();
+        }
+
+        return null;
+    }
+
+    private Button FindButtonByName(string buttonName)
+    {
+        if (bottomButtonsContainer != null)
+        {
+            Transform buttonTransform = bottomButtonsContainer.Find(buttonName);
+            if (buttonTransform != null)
+            {
+                return buttonTransform.GetComponent<Button>();
+            }
+        }
+
+        GameObject buttonObject = GameObject.Find(buttonName);
+        if (buttonObject != null)
+        {
+            return buttonObject.GetComponent<Button>();
         }
 
         return null;
@@ -262,7 +320,10 @@ public class UIARMAnager : MonoBehaviour
                 }
 
                 placementManager.SelectFurniture(item);
-                placementManager.PlaceSelectedFurniture();
+                if (!placementManager.UsesARTapPlacement)
+                {
+                    placementManager.PlaceSelectedFurniture();
+                }
             });
         }
     }

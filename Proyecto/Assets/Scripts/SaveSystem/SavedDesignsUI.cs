@@ -36,14 +36,16 @@ public class SavedDesignsUI : MonoBehaviour
             roomDemoListContent,
             roomDemoItemTemplateButton,
             roomDemoEmptyMessageText,
-            true);
+            true,
+            false);
 
         BuildList(
             DesignSaveManager.GetSavedDesignFiles("ARScene"),
             arListContent,
             arItemTemplateButton,
             arEmptyMessageText,
-            false);
+            false,
+            true);
     }
 
     private void ResolveReferences()
@@ -108,7 +110,8 @@ public class SavedDesignsUI : MonoBehaviour
         Transform listContent,
         Button itemTemplateButton,
         TextMeshProUGUI emptyMessageText,
-        bool canLoadRoomDemo)
+        bool canLoadRoomDemo,
+        bool canLoadARScene)
     {
         ClearGeneratedItems(listContent, itemTemplateButton);
 
@@ -131,12 +134,16 @@ public class SavedDesignsUI : MonoBehaviour
             Button itemButton = Instantiate(itemTemplateButton, listContent);
             itemButton.name = "SavedDesign_" + Path.GetFileNameWithoutExtension(filePath);
             itemButton.gameObject.SetActive(true);
-            itemButton.interactable = canLoadRoomDemo;
+            itemButton.interactable = canLoadRoomDemo || canLoadARScene;
             itemButton.onClick.RemoveAllListeners();
 
             if (canLoadRoomDemo)
             {
                 itemButton.onClick.AddListener(() => DesignSaveManager.LoadRoomDemoDesign(filePath));
+            }
+            else if (canLoadARScene)
+            {
+                itemButton.onClick.AddListener(() => DesignSaveManager.LoadARDesign(filePath));
             }
 
             TextMeshProUGUI label = itemButton.GetComponentInChildren<TextMeshProUGUI>();
