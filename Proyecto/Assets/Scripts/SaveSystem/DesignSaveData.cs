@@ -23,4 +23,7 @@ public class PlacedFurnitureData
     public float posZ;
     public float rotY;
     public float scale;
+    public float scaleX;
+    public float scaleY;
+    public float scaleZ;
 }

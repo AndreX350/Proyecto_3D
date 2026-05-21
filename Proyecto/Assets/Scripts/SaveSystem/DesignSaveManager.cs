@@ -52,7 +52,10 @@ public class DesignSaveManager : MonoBehaviour
                     posY = t.position.y,
                     posZ = t.position.z,
                     rotY = t.eulerAngles.y,
-                    scale = t.localScale.x
+                    scale = t.localScale.x,
+                    scaleX = t.localScale.x,
+                    scaleY = t.localScale.y,
+                    scaleZ = t.localScale.z
                 };
 
                 saveData.items.Add(item);
@@ -228,7 +231,8 @@ public class DesignSaveManager : MonoBehaviour
             }
 
             Vector3 position = new Vector3(savedItem.posX, savedItem.posY, savedItem.posZ);
-            placementManager.PlaceLoadedFurniture(catalogItem, position, savedItem.rotY, savedItem.scale);
+            Vector3 savedScale = GetSavedScale(savedItem, catalogItem.defaultScale);
+            placementManager.PlaceLoadedFurniture(catalogItem, position, savedItem.rotY, savedScale);
         }
 
         if (saveData.hasWallColor && roomColorManager != null)
@@ -253,5 +257,21 @@ public class DesignSaveManager : MonoBehaviour
 
         string json = File.ReadAllText(filePath);
         return JsonUtility.FromJson<DesignSaveData>(json);
+    }
+
+    private static Vector3 GetSavedScale(PlacedFurnitureData savedItem, Vector3 defaultScale)
+    {
+        bool hasVectorScale = savedItem.scaleX > 0f && savedItem.scaleY > 0f && savedItem.scaleZ > 0f;
+        if (hasVectorScale)
+        {
+            return new Vector3(savedItem.scaleX, savedItem.scaleY, savedItem.scaleZ);
+        }
+
+        if (savedItem.scale > 0f)
+        {
+            return Vector3.one * savedItem.scale;
+        }
+
+        return defaultScale.sqrMagnitude > 0f ? defaultScale : Vector3.one;
     }
 }

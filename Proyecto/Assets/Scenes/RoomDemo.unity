@@ -349,7 +349,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &67476556
 RectTransform:
   m_ObjectHideFlags: 0
@@ -1673,6 +1673,7 @@ GameObject:
   - component: {fileID: 412165010}
   - component: {fileID: 412165009}
   - component: {fileID: 412165012}
+  - component: {fileID: 412165013}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -1747,13 +1748,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 412165008}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.17364816, y: 0, z: 0, w: 0.9848078}
-  m_LocalPosition: {x: -8.23, y: 2.5, z: -6}
+  m_LocalRotation: {x: 0.08715578, y: 0, z: 0, w: 0.9961947}
+  m_LocalPosition: {x: -8.23, y: 2.5, z: -1.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 20, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 10, y: 0, z: 0}
 --- !u!114 &412165012
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1798,6 +1799,29 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!114 &412165013
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 412165008}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: edb79c3352d044a499d7f31b7d8be73f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveSpeed: 2.5
+  sprintMultiplier: 1.6
+  lockHeight: 1
+  fixedHeight: 2.6
+  mouseLookSensitivity: 2.2
+  touchLookSensitivity: 0.11
+  minPitch: -25
+  maxPitch: 35
+  clampToRoomBounds: 1
+  roomMin: {x: -12.23, y: 2.4, z: -4}
+  roomMax: {x: -4.23, y: 2.8, z: 4}
 --- !u!1 &454769882
 GameObject:
   m_ObjectHideFlags: 0
@@ -3733,7 +3757,7 @@ GameObject:
   - component: {fileID: 947948436}
   - component: {fileID: 947948435}
   - component: {fileID: 947948434}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: Wall_Left
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -4331,7 +4355,7 @@ GameObject:
   - component: {fileID: 1094276839}
   - component: {fileID: 1094276838}
   - component: {fileID: 1094276837}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: Room_Floor
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -4705,7 +4729,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1210298285}
   - component: {fileID: 1210298284}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: FurniturePlacementManager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -4730,6 +4754,22 @@ MonoBehaviour:
   placementsPerRow: 4
   rowSpacing: 1.1
   selectedFurniture: {fileID: 11400000, guid: c78ae759e2a148840bc1d757665311d4, type: 2}
+  enableARPlacement: 0
+  arRaycastManager: {fileID: 0}
+  placementCamera: {fileID: 412165010}
+  placedFurnitureLayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  enableRoomEditing: 1
+  floorLayerMask:
+    serializedVersion: 2
+    m_Bits: 8
+  moveRayDistance: 100
+  rotateStepDegrees: 45
+  scaleStep: 0.1
+  minUniformScale: 0.4
+  maxUniformScale: 2.5
+  blockRoomEditingWhenPointerOverUI: 0
 --- !u!4 &1210298285
 Transform:
   m_ObjectHideFlags: 0
@@ -5450,7 +5490,7 @@ GameObject:
   - component: {fileID: 1355120572}
   - component: {fileID: 1355120571}
   - component: {fileID: 1355120570}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: Wall_Right
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -7017,7 +7057,7 @@ GameObject:
   - component: {fileID: 1836039715}
   - component: {fileID: 1836039714}
   - component: {fileID: 1836039713}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: Wall_Back
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -7121,6 +7161,8 @@ GameObject:
   - component: {fileID: 1844927271}
   - component: {fileID: 1844927270}
   - component: {fileID: 1844927269}
+  - component: {fileID: 1844927273}
+  - component: {fileID: 1844927272}
   m_Layer: 0
   m_Name: UIManager
   m_TagString: Untagged
@@ -7173,6 +7215,38 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1844927272
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1844927268}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f657b1898db3c834ebd1e3d74fb64405, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  panelColors: {fileID: 0}
+  panelFurniture: {fileID: 0}
+  furnitureCatalog: {fileID: 389135344}
+  placementManager: {fileID: 1210298284}
+  roomColorManager: {fileID: 0}
+  designSaveManager: {fileID: 0}
+--- !u!114 &1844927273
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1844927268}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3911c3886e1e4ba4a978013e0a7d2cd2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mueblePrefab: {fileID: 0}
+  puntoSpawn: {fileID: 0}
 --- !u!1 &1859342516
 GameObject:
   m_ObjectHideFlags: 0

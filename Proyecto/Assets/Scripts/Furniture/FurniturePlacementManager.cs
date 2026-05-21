@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 
@@ -39,10 +40,37 @@ public class FurniturePlacementManager : MonoBehaviour
     [SerializeField]
     private LayerMask placedFurnitureLayerMask = ~0;
 
+    [Header("RoomDemo Editing")]
+    [SerializeField]
+    private bool enableRoomEditing = true;
+
+    [SerializeField]
+    private LayerMask floorLayerMask = ~0;
+
+    [SerializeField]
+    private float moveRayDistance = 100f;
+
+    [SerializeField]
+    private float rotateStepDegrees = 45f;
+
+    [SerializeField]
+    private float scaleStep = 0.1f;
+
+    [SerializeField]
+    private float minUniformScale = 0.4f;
+
+    [SerializeField]
+    private float maxUniformScale = 2.5f;
+
+    [SerializeField]
+    private bool blockRoomEditingWhenPointerOverUI = true;
+
     private readonly List<GameObject> placedFurniture = new List<GameObject>();
     private readonly List<ARRaycastHit> arHits = new List<ARRaycastHit>();
     private GameObject lastPlacedFurniture;
     private GameObject selectedPlacedFurniture;
+    private bool isDraggingSelectedFurniture;
+    private Plane selectedDragPlane;
     public IReadOnlyList<GameObject> PlacedFurniture => placedFurniture;
     public bool UsesARTapPlacement => enableARPlacement && arRaycastManager != null;
 
@@ -60,6 +88,17 @@ public class FurniturePlacementManager : MonoBehaviour
     }
 
     private void Update()
+    {
+        if (UsesARTapPlacement)
+        {
+            UpdateARPlacementInput();
+            return;
+        }
+
+        UpdateRoomEditingInput();
+    }
+
+    private void UpdateARPlacementInput()
     {
         if (!enableARPlacement || arRaycastManager == null)
         {
@@ -88,6 +127,105 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         TryPlaceSelectedFurnitureAtScreenPoint(touch.position);
+    }
+
+    private void UpdateRoomEditingInput()
+    {
+        if (!enableRoomEditing)
+        {
+            return;
+        }
+
+        if (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+            if (touch.phase == TouchPhase.Began)
+            {
+                HandlePointerDown(touch.position, touch.fingerId);
+            }
+            else if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
+            {
+                if (blockRoomEditingWhenPointerOverUI && IsPointerOverBlockingUI(touch.position, touch.fingerId))
+                {
+                    isDraggingSelectedFurniture = false;
+                    return;
+                }
+
+                HandlePointerDrag(touch.position);
+            }
+            else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+            {
+                isDraggingSelectedFurniture = false;
+            }
+
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            HandlePointerDown(Input.mousePosition, -1);
+        }
+        else if (Input.GetMouseButton(0))
+        {
+            if (blockRoomEditingWhenPointerOverUI && IsPointerOverBlockingUI(Input.mousePosition, -1))
+            {
+                isDraggingSelectedFurniture = false;
+                return;
+            }
+
+            HandlePointerDrag(Input.mousePosition);
+        }
+        else if (Input.GetMouseButtonUp(0))
+        {
+            isDraggingSelectedFurniture = false;
+        }
+    }
+
+    private void HandlePointerDown(Vector2 screenPoint, int pointerId)
+    {
+        if (blockRoomEditingWhenPointerOverUI && IsPointerOverBlockingUI(screenPoint, pointerId))
+        {
+            isDraggingSelectedFurniture = false;
+            return;
+        }
+
+        if (TrySelectPlacedFurnitureAtScreenPoint(screenPoint))
+        {
+            BeginSelectedFurnitureDrag();
+            return;
+        }
+
+        if (TryMoveSelectedFurnitureToScreenPoint(screenPoint))
+        {
+            BeginSelectedFurnitureDrag();
+        }
+    }
+
+    private void HandlePointerDrag(Vector2 screenPoint)
+    {
+        if (!isDraggingSelectedFurniture || selectedPlacedFurniture == null)
+        {
+            return;
+        }
+
+        Camera cam = GetPlacementCamera();
+        if (cam == null)
+        {
+            return;
+        }
+
+        Ray ray = cam.ScreenPointToRay(screenPoint);
+        if (TryGetFloorHitPosition(ray, out Vector3 floorPosition))
+        {
+            selectedPlacedFurniture.transform.position = floorPosition;
+            return;
+        }
+
+        if (selectedDragPlane.Raycast(ray, out float enter))
+        {
+            Vector3 planePoint = ray.GetPoint(enter);
+            selectedPlacedFurniture.transform.position = planePoint;
+        }
     }
 
     public void SelectFurniture(FurnitureItemData item)
@@ -176,6 +314,12 @@ public class FurniturePlacementManager : MonoBehaviour
 
     public void PlaceLoadedFurniture(FurnitureItemData item, Vector3 position, float rotY, float scale)
     {
+        float safeScale = scale > 0f ? scale : item != null ? item.defaultScale.x : 1f;
+        PlaceLoadedFurniture(item, position, rotY, Vector3.one * safeScale);
+    }
+
+    public void PlaceLoadedFurniture(FurnitureItemData item, Vector3 position, float rotY, Vector3 scale)
+    {
         if (item == null)
         {
             Debug.LogWarning("FurniturePlacementManager: loaded item is null.");
@@ -188,8 +332,8 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        float safeScale = scale > 0f ? scale : item.defaultScale.x;
-        AddFurnitureInstance(item, position, Quaternion.Euler(0f, rotY, 0f), Vector3.one * safeScale);
+        Vector3 safeScale = scale.sqrMagnitude > 0f ? scale : item.defaultScale;
+        AddFurnitureInstance(item, position, Quaternion.Euler(0f, rotY, 0f), safeScale);
     }
 
     private void AddFurnitureInstance(FurnitureItemData item, Vector3 position, Quaternion rotation, Vector3 scale)
@@ -200,6 +344,7 @@ public class FurniturePlacementManager : MonoBehaviour
 
         placedFurniture.Add(instance);
         lastPlacedFurniture = instance;
+        SetSelectedFurniture(instance);
     }
 
     public bool TrySelectPlacedFurnitureAtScreenPoint(Vector2 screenPoint)
@@ -228,19 +373,25 @@ public class FurniturePlacementManager : MonoBehaviour
 
     public void DeleteSelectedFurniture()
     {
-        if (selectedPlacedFurniture == null)
+        GameObject target = selectedPlacedFurniture != null ? selectedPlacedFurniture : lastPlacedFurniture;
+        if (target == null)
         {
             Debug.LogWarning("FurniturePlacementManager: no selected furniture to delete.");
             return;
         }
 
-        placedFurniture.Remove(selectedPlacedFurniture);
-        if (lastPlacedFurniture == selectedPlacedFurniture)
+        placedFurniture.Remove(target);
+        if (lastPlacedFurniture == target)
         {
             lastPlacedFurniture = null;
         }
 
-        GameObject toDelete = selectedPlacedFurniture;
+        if (selectedPlacedFurniture == target)
+        {
+            selectedPlacedFurniture = null;
+        }
+
+        GameObject toDelete = target;
         selectedPlacedFurniture = null;
         Destroy(toDelete);
         Debug.Log("Deleted selected furniture.");
@@ -248,14 +399,44 @@ public class FurniturePlacementManager : MonoBehaviour
 
     public void RotateLastFurniture()
     {
-        if (lastPlacedFurniture == null)
+        RotateSelectedFurniture();
+    }
+
+    public void RotateSelectedFurniture()
+    {
+        GameObject target = selectedPlacedFurniture != null ? selectedPlacedFurniture : lastPlacedFurniture;
+        if (target == null)
         {
             Debug.LogWarning("FurniturePlacementManager: no furniture to rotate.");
             return;
         }
 
-        lastPlacedFurniture.transform.Rotate(0f, 45f, 0f);
-        Debug.Log("Rotated furniture: " + lastPlacedFurniture.name);
+        target.transform.Rotate(0f, rotateStepDegrees, 0f);
+        Debug.Log("Rotated furniture: " + target.name);
+    }
+
+    public void ScaleSelectedFurniture(float signedStep)
+    {
+        GameObject target = selectedPlacedFurniture != null ? selectedPlacedFurniture : lastPlacedFurniture;
+        if (target == null)
+        {
+            Debug.LogWarning("FurniturePlacementManager: no selected furniture to scale.");
+            return;
+        }
+
+        float uniformScale = target.transform.localScale.x + signedStep;
+        uniformScale = Mathf.Clamp(uniformScale, minUniformScale, maxUniformScale);
+        target.transform.localScale = Vector3.one * uniformScale;
+    }
+
+    public void IncreaseSelectedFurnitureScale()
+    {
+        ScaleSelectedFurniture(scaleStep);
+    }
+
+    public void DecreaseSelectedFurnitureScale()
+    {
+        ScaleSelectedFurniture(-scaleStep);
     }
 
     public void ClearPlacedFurniture()
@@ -329,11 +510,97 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         selectedPlacedFurniture = target;
+        lastPlacedFurniture = target;
         Debug.Log("Selected placed furniture: " + selectedPlacedFurniture.name);
     }
 
     private void ClearSelectedFurniture()
     {
         selectedPlacedFurniture = null;
+        isDraggingSelectedFurniture = false;
+    }
+
+    private void BeginSelectedFurnitureDrag()
+    {
+        if (selectedPlacedFurniture == null)
+        {
+            return;
+        }
+
+        isDraggingSelectedFurniture = true;
+        selectedDragPlane = new Plane(Vector3.up, selectedPlacedFurniture.transform.position);
+    }
+
+    private Camera GetPlacementCamera()
+    {
+        if (placementCamera != null)
+        {
+            return placementCamera;
+        }
+
+        placementCamera = Camera.main;
+        return placementCamera;
+    }
+
+    private bool TryGetFloorHitPosition(Ray ray, out Vector3 hitPoint)
+    {
+        if (Physics.Raycast(ray, out RaycastHit floorHit, moveRayDistance, floorLayerMask))
+        {
+            hitPoint = floorHit.point;
+            return true;
+        }
+
+        hitPoint = Vector3.zero;
+        return false;
+    }
+
+    private bool TryMoveSelectedFurnitureToScreenPoint(Vector2 screenPoint)
+    {
+        GameObject target = selectedPlacedFurniture != null ? selectedPlacedFurniture : lastPlacedFurniture;
+        if (target == null)
+        {
+            return false;
+        }
+
+        Camera cam = GetPlacementCamera();
+        if (cam == null)
+        {
+            return false;
+        }
+
+        Ray ray = cam.ScreenPointToRay(screenPoint);
+        if (!TryGetFloorHitPosition(ray, out Vector3 floorPoint))
+        {
+            return false;
+        }
+
+        target.transform.position = floorPoint;
+        SetSelectedFurniture(target);
+        return true;
+    }
+
+    private bool IsPointerOverBlockingUI(Vector2 screenPoint, int pointerId)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        bool overUI = pointerId >= 0
+            ? EventSystem.current.IsPointerOverGameObject(pointerId)
+            : EventSystem.current.IsPointerOverGameObject();
+        if (!overUI)
+        {
+            return false;
+        }
+
+        PointerEventData eventData = new PointerEventData(EventSystem.current)
+        {
+            position = screenPoint
+        };
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(eventData, results);
+        return results.Count > 0;
     }
 }

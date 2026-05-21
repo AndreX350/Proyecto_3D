@@ -41,6 +41,7 @@ public class UIARMAnager : MonoBehaviour
         EnsureRuntimePanels();
         EnsureRotateButton();
         EnsureDeleteButton();
+        EnsureScaleButtons();
         BuildFurniturePanel();
         BuildColorPanel();
         ClosePanels();
@@ -95,7 +96,7 @@ public class UIARMAnager : MonoBehaviour
         ClosePanels();
     }
 
-    public void RotateLastFurniture()
+    public void RotateSelectedFurniture()
     {
         if (placementManager == null)
         {
@@ -103,7 +104,7 @@ public class UIARMAnager : MonoBehaviour
             return;
         }
 
-        placementManager.RotateLastFurniture();
+        placementManager.RotateSelectedFurniture();
         ClosePanels();
     }
 
@@ -116,6 +117,30 @@ public class UIARMAnager : MonoBehaviour
         }
 
         placementManager.DeleteSelectedFurniture();
+        ClosePanels();
+    }
+
+    public void IncreaseSelectedFurnitureScale()
+    {
+        if (placementManager == null)
+        {
+            Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
+            return;
+        }
+
+        placementManager.IncreaseSelectedFurnitureScale();
+        ClosePanels();
+    }
+
+    public void DecreaseSelectedFurnitureScale()
+    {
+        if (placementManager == null)
+        {
+            Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
+            return;
+        }
+
+        placementManager.DecreaseSelectedFurnitureScale();
         ClosePanels();
     }
 
@@ -224,8 +249,8 @@ public class UIARMAnager : MonoBehaviour
             rotateButton.name = "BtnRotate";
         }
 
-        rotateButton.onClick.RemoveListener(RotateLastFurniture);
-        rotateButton.onClick.AddListener(RotateLastFurniture);
+        rotateButton.onClick.RemoveListener(RotateSelectedFurniture);
+        rotateButton.onClick.AddListener(RotateSelectedFurniture);
     }
 
     private void EnsureDeleteButton()
@@ -250,6 +275,34 @@ public class UIARMAnager : MonoBehaviour
 
         deleteButton.onClick.RemoveListener(DeleteSelectedFurniture);
         deleteButton.onClick.AddListener(DeleteSelectedFurniture);
+    }
+
+    private void EnsureScaleButtons()
+    {
+        if (placementManager == null || bottomButtonsContainer == null)
+        {
+            return;
+        }
+
+        Button scaleUpButton = FindButtonByName("BtnScaleUp");
+        if (scaleUpButton == null)
+        {
+            scaleUpButton = CreateTextButton(bottomButtonsContainer, "ESC+");
+            scaleUpButton.name = "BtnScaleUp";
+        }
+
+        scaleUpButton.onClick.RemoveListener(IncreaseSelectedFurnitureScale);
+        scaleUpButton.onClick.AddListener(IncreaseSelectedFurnitureScale);
+
+        Button scaleDownButton = FindButtonByName("BtnScaleDown");
+        if (scaleDownButton == null)
+        {
+            scaleDownButton = CreateTextButton(bottomButtonsContainer, "ESC-");
+            scaleDownButton.name = "BtnScaleDown";
+        }
+
+        scaleDownButton.onClick.RemoveListener(DecreaseSelectedFurnitureScale);
+        scaleDownButton.onClick.AddListener(DecreaseSelectedFurnitureScale);
     }
 
     private Button FindRotateButton()
