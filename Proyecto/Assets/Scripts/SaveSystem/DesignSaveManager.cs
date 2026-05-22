@@ -125,6 +125,19 @@ public class DesignSaveManager : MonoBehaviour
         SceneManager.LoadScene(ARSceneName);
     }
 
+    public static bool DeleteDesign(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+        {
+            Debug.LogWarning("DesignSaveManager: no se encontro el guardado para borrar " + filePath);
+            return false;
+        }
+
+        File.Delete(filePath);
+        Debug.Log("DesignSaveManager: guardado borrado " + filePath);
+        return true;
+    }
+
     public static void TryLoadPendingRoomDemoDesign(
         FurnitureCatalog catalog,
         FurniturePlacementManager placementManager,

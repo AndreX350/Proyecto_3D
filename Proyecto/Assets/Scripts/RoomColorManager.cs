@@ -1,13 +1,22 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
 
 public class RoomColorManager : MonoBehaviour
 {
     [SerializeField]
     private List<Renderer> wallRenderers = new List<Renderer>();
 
+    [SerializeField]
+    private float arWallOverlayAlpha = 0.45f;
+
+    [SerializeField]
+    private float minimumARWallSize = 0.25f;
+
     private Color currentWallColor = Color.white;
     private bool hasCurrentWallColor;
+    private readonly Dictionary<ARPlane, Renderer> arWallOverlays = new Dictionary<ARPlane, Renderer>();
 
     private static readonly HashSet<string> AllowedWallNames = new HashSet<string>
     {
@@ -24,35 +33,43 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        if (!hasCurrentWallColor)
+        {
+            return;
+        }
+
+        int previousCount = wallRenderers.Count;
+        AddDetectedARWalls();
+        for (int i = previousCount; i < wallRenderers.Count; i++)
+        {
+            ApplyColorToRenderer(wallRenderers[i], currentWallColor);
+        }
+    }
+
     public void ApplyWallColor(Color color)
     {
+        currentWallColor = color;
+        hasCurrentWallColor = true;
+
         if (wallRenderers.Count == 0)
         {
             FindWallsInScene();
         }
 
+        AddDetectedARWalls();
+
         if (wallRenderers.Count == 0)
         {
-            Debug.LogWarning("RoomColorManager: no se encontraron paredes para pintar.");
+            Debug.LogWarning("RoomColorManager: color guardado; esperando detectar paredes AR.");
             return;
         }
 
         foreach (Renderer wallRenderer in wallRenderers)
         {
-            if (wallRenderer != null)
-            {
-                Material wallMaterial = wallRenderer.material;
-                wallMaterial.color = color;
-
-                if (wallMaterial.HasProperty("_BaseColor"))
-                {
-                    wallMaterial.SetColor("_BaseColor", color);
-                }
-            }
+            ApplyColorToRenderer(wallRenderer, color);
         }
-
-        currentWallColor = color;
-        hasCurrentWallColor = true;
 
         Debug.Log("Color de pared aplicado.");
     }
@@ -69,6 +86,8 @@ public class RoomColorManager : MonoBehaviour
         {
             FindWallsInScene();
         }
+
+        AddDetectedARWalls();
 
         foreach (Renderer wallRenderer in wallRenderers)
         {
@@ -109,6 +128,158 @@ public class RoomColorManager : MonoBehaviour
             {
                 wallRenderers.Add(sceneRenderer);
             }
+        }
+
+        AddDetectedARWalls();
+    }
+
+    private void AddDetectedARWalls()
+    {
+        ARPlane[] planes = FindObjectsOfType<ARPlane>();
+        foreach (ARPlane plane in planes)
+        {
+            if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+            {
+                continue;
+            }
+
+            Renderer renderer = EnsureARWallOverlay(plane);
+            if (renderer != null && !wallRenderers.Contains(renderer))
+            {
+                wallRenderers.Add(renderer);
+            }
+        }
+    }
+
+    private Renderer EnsureARWallOverlay(ARPlane plane)
+    {
+        if (arWallOverlays.TryGetValue(plane, out Renderer existingRenderer) && existingRenderer != null)
+        {
+            UpdateARWallOverlayMesh(plane, existingRenderer.GetComponent<MeshFilter>());
+            return existingRenderer;
+        }
+
+        GameObject overlay = new GameObject("ARWallColorOverlay");
+        overlay.transform.SetParent(plane.transform, false);
+
+        MeshFilter meshFilter = overlay.AddComponent<MeshFilter>();
+        MeshRenderer renderer = overlay.AddComponent<MeshRenderer>();
+        renderer.sharedMaterial = CreateARWallMaterial(currentWallColor);
+        UpdateARWallOverlayMesh(plane, meshFilter);
+
+        arWallOverlays[plane] = renderer;
+        return renderer;
+    }
+
+    private void UpdateARWallOverlayMesh(ARPlane plane, MeshFilter meshFilter)
+    {
+        if (meshFilter == null)
+        {
+            return;
+        }
+
+        Vector2 size = plane.size;
+        if (size.x < minimumARWallSize || size.y < minimumARWallSize)
+        {
+            size = new Vector2(
+                Mathf.Max(size.x, minimumARWallSize),
+                Mathf.Max(size.y, minimumARWallSize));
+        }
+
+        Vector2 center = plane.center;
+        float halfWidth = size.x * 0.5f;
+        float halfHeight = size.y * 0.5f;
+
+        Mesh mesh = meshFilter.sharedMesh;
+        if (mesh == null)
+        {
+            mesh = new Mesh();
+            mesh.name = "ARWallColorOverlayMesh";
+            meshFilter.sharedMesh = mesh;
+        }
+
+        mesh.Clear();
+        mesh.vertices = new[]
+        {
+            new Vector3(center.x - halfWidth, 0f, center.y - halfHeight),
+            new Vector3(center.x + halfWidth, 0f, center.y - halfHeight),
+            new Vector3(center.x - halfWidth, 0f, center.y + halfHeight),
+            new Vector3(center.x + halfWidth, 0f, center.y + halfHeight)
+        };
+        mesh.uv = new[]
+        {
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f)
+        };
+        mesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+    }
+
+    private void ApplyColorToRenderer(Renderer wallRenderer, Color color)
+    {
+        if (wallRenderer == null)
+        {
+            return;
+        }
+
+        bool isARWall = wallRenderer.GetComponentInParent<ARPlane>() != null;
+        Color appliedColor = isARWall
+            ? new Color(color.r, color.g, color.b, arWallOverlayAlpha)
+            : color;
+        Material wallMaterial = wallRenderer.material;
+        ConfigureMaterialForColor(wallMaterial, appliedColor, isARWall);
+    }
+
+    private Material CreateARWallMaterial(Color color)
+    {
+        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null)
+        {
+            shader = Shader.Find("Unlit/Color");
+        }
+
+        Material material = new Material(shader);
+        ConfigureMaterialForColor(material, new Color(color.r, color.g, color.b, arWallOverlayAlpha), true);
+        return material;
+    }
+
+    private static void ConfigureMaterialForColor(Material material, Color color, bool transparent)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        material.color = color;
+
+        if (material.HasProperty("_BaseColor"))
+        {
+            material.SetColor("_BaseColor", color);
+        }
+
+        if (!transparent)
+        {
+            return;
+        }
+
+        SetFloatIfMaterialHasProperty(material, "_Surface", 1f);
+        SetFloatIfMaterialHasProperty(material, "_Blend", 0f);
+        SetFloatIfMaterialHasProperty(material, "_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        SetFloatIfMaterialHasProperty(material, "_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        SetFloatIfMaterialHasProperty(material, "_ZWrite", 0);
+        SetFloatIfMaterialHasProperty(material, "_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+    }
+
+    private static void SetFloatIfMaterialHasProperty(Material material, string propertyName, float value)
+    {
+        if (material.HasProperty(propertyName))
+        {
+            material.SetFloat(propertyName, value);
         }
     }
 }

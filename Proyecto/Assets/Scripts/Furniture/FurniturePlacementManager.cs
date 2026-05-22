@@ -7,6 +7,8 @@ using UnityEngine.XR.ARSubsystems;
 
 public class FurniturePlacementManager : MonoBehaviour
 {
+    private static float blockWorldInputUntil;
+
     [Header("Placement")]
     [SerializeField]
     private Transform spawnPoint = null;
@@ -33,6 +35,12 @@ public class FurniturePlacementManager : MonoBehaviour
 
     [SerializeField]
     private ARRaycastManager arRaycastManager;
+
+    [SerializeField]
+    private bool anchorARPlacedFurniture = true;
+
+    [SerializeField]
+    private float arFallbackPlacementDistance = 1.6f;
 
     [SerializeField]
     private Camera placementCamera;
@@ -65,14 +73,23 @@ public class FurniturePlacementManager : MonoBehaviour
     [SerializeField]
     private bool blockRoomEditingWhenPointerOverUI = true;
 
+    [SerializeField]
+    private bool blockPlacementWhenPointerOverUI = true;
+
     private readonly List<GameObject> placedFurniture = new List<GameObject>();
     private readonly List<ARRaycastHit> arHits = new List<ARRaycastHit>();
     private GameObject lastPlacedFurniture;
     private GameObject selectedPlacedFurniture;
     private bool isDraggingSelectedFurniture;
+    private bool isDraggingARFurniture;
     private Plane selectedDragPlane;
     public IReadOnlyList<GameObject> PlacedFurniture => placedFurniture;
     public bool UsesARTapPlacement => enableARPlacement && arRaycastManager != null;
+
+    public static void BlockWorldInputBriefly(float seconds = 0.25f)
+    {
+        blockWorldInputUntil = Mathf.Max(blockWorldInputUntil, Time.unscaledTime + seconds);
+    }
 
     private void Awake()
     {
@@ -89,6 +106,14 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private void Update()
     {
+        RefreshRuntimeReferences();
+
+        if (Time.unscaledTime < blockWorldInputUntil)
+        {
+            isDraggingSelectedFurniture = false;
+            return;
+        }
+
         if (UsesARTapPlacement)
         {
             UpdateARPlacementInput();
@@ -96,6 +121,19 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         UpdateRoomEditingInput();
+    }
+
+    private void RefreshRuntimeReferences()
+    {
+        if (placementCamera == null || !placementCamera.enabled)
+        {
+            placementCamera = Camera.main;
+        }
+
+        if (arRaycastManager == null)
+        {
+            arRaycastManager = FindObjectOfType<ARRaycastManager>();
+        }
     }
 
     private void UpdateARPlacementInput()
@@ -107,26 +145,44 @@ public class FurniturePlacementManager : MonoBehaviour
 
         if (Input.touchCount <= 0)
         {
+            isDraggingARFurniture = false;
             return;
         }
 
         Touch touch = Input.GetTouch(0);
-        if (touch.phase != TouchPhase.Began)
+        if (IsPointerOverBlockingUI(touch.position, touch.fingerId))
         {
+            isDraggingARFurniture = false;
             return;
         }
 
-        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+        if (touch.phase == TouchPhase.Began)
         {
+            if (TrySelectPlacedFurnitureAtScreenPoint(touch.position))
+            {
+                isDraggingARFurniture = true;
+                return;
+            }
+
+            TryPlaceSelectedFurnitureAtScreenPoint(touch.position);
             return;
         }
 
-        if (TrySelectPlacedFurnitureAtScreenPoint(touch.position))
+        if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
         {
+            if (isDraggingARFurniture && selectedPlacedFurniture != null)
+            {
+                TryMoveSelectedARFurnitureToScreenPoint(touch.position);
+            }
+
             return;
         }
 
-        TryPlaceSelectedFurnitureAtScreenPoint(touch.position);
+        if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+        {
+            isDraggingARFurniture = false;
+            return;
+        }
     }
 
     private void UpdateRoomEditingInput()
@@ -145,7 +201,7 @@ public class FurniturePlacementManager : MonoBehaviour
             }
             else if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
             {
-                if (blockRoomEditingWhenPointerOverUI && IsPointerOverBlockingUI(touch.position, touch.fingerId))
+                if (IsPointerBlockedByUI(touch.position, touch.fingerId))
                 {
                     isDraggingSelectedFurniture = false;
                     return;
@@ -167,7 +223,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
         else if (Input.GetMouseButton(0))
         {
-            if (blockRoomEditingWhenPointerOverUI && IsPointerOverBlockingUI(Input.mousePosition, -1))
+            if (IsPointerBlockedByUI(Input.mousePosition, -1))
             {
                 isDraggingSelectedFurniture = false;
                 return;
@@ -183,7 +239,7 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private void HandlePointerDown(Vector2 screenPoint, int pointerId)
     {
-        if (blockRoomEditingWhenPointerOverUI && IsPointerOverBlockingUI(screenPoint, pointerId))
+        if (IsPointerBlockedByUI(screenPoint, pointerId))
         {
             isDraggingSelectedFurniture = false;
             return;
@@ -236,6 +292,11 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             ClearSelectedFurniture();
             Debug.Log("Selected furniture: " + selectedFurniture.itemName);
+
+            if (UsesARTapPlacement)
+            {
+                PlaceSelectedFurnitureInCameraView();
+            }
         }
     }
 
@@ -248,6 +309,33 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         PlaceFurniture(selectedFurniture);
+    }
+
+    public void PlaceSelectedFurnitureInCameraView()
+    {
+        if (selectedFurniture == null)
+        {
+            Debug.LogWarning("FurniturePlacementManager: no furniture selected.");
+            return;
+        }
+
+        Camera cam = GetPlacementCamera();
+        if (cam == null)
+        {
+            PlaceSelectedFurniture();
+            return;
+        }
+
+        Vector2 screenCenter = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+        if (TryPlaceSelectedFurnitureAtScreenPoint(screenCenter))
+        {
+            return;
+        }
+
+        Vector3 position = cam.transform.position + cam.transform.forward * arFallbackPlacementDistance + selectedFurniture.placementOffset;
+        Quaternion rotation = Quaternion.Euler(0f, cam.transform.eulerAngles.y, 0f);
+        GameObject placed = PlaceFurnitureAt(selectedFurniture, position, rotation);
+        TryAnchorPlacedFurniture(placed);
     }
 
     public void PlaceFurniture(FurnitureItemData item)
@@ -290,26 +378,28 @@ public class FurniturePlacementManager : MonoBehaviour
         Pose hitPose = arHits[0].pose;
         Vector3 position = hitPose.position + selectedFurniture.placementOffset;
         Quaternion rotation = Quaternion.Euler(0f, hitPose.rotation.eulerAngles.y, 0f);
-        PlaceFurnitureAt(selectedFurniture, position, rotation);
+        GameObject placed = PlaceFurnitureAt(selectedFurniture, position, rotation);
+        TryAnchorPlacedFurniture(placed);
         return true;
     }
 
-    public void PlaceFurnitureAt(FurnitureItemData item, Vector3 position, Quaternion rotation)
+    public GameObject PlaceFurnitureAt(FurnitureItemData item, Vector3 position, Quaternion rotation)
     {
         if (item == null)
         {
             Debug.LogWarning("FurniturePlacementManager: item is null.");
-            return;
+            return null;
         }
 
         if (item.prefab == null)
         {
             Debug.LogWarning("FurniturePlacementManager: item has no prefab: " + item.itemName);
-            return;
+            return null;
         }
 
-        AddFurnitureInstance(item, position, rotation, item.defaultScale);
+        GameObject instance = AddFurnitureInstance(item, position, rotation, item.defaultScale);
         Debug.Log("Placed furniture at position: " + item.itemName);
+        return instance;
     }
 
     public void PlaceLoadedFurniture(FurnitureItemData item, Vector3 position, float rotY, float scale)
@@ -336,15 +426,17 @@ public class FurniturePlacementManager : MonoBehaviour
         AddFurnitureInstance(item, position, Quaternion.Euler(0f, rotY, 0f), safeScale);
     }
 
-    private void AddFurnitureInstance(FurnitureItemData item, Vector3 position, Quaternion rotation, Vector3 scale)
+    private GameObject AddFurnitureInstance(FurnitureItemData item, Vector3 position, Quaternion rotation, Vector3 scale)
     {
         GameObject instance = Instantiate(item.prefab, position, rotation);
         instance.name = "Placed_" + item.itemName;
         instance.transform.localScale = scale;
+        EnsureSelectableCollider(instance);
 
         placedFurniture.Add(instance);
         lastPlacedFurniture = instance;
         SetSelectedFurniture(instance);
+        return instance;
     }
 
     public bool TrySelectPlacedFurnitureAtScreenPoint(Vector2 screenPoint)
@@ -518,6 +610,7 @@ public class FurniturePlacementManager : MonoBehaviour
     {
         selectedPlacedFurniture = null;
         isDraggingSelectedFurniture = false;
+        isDraggingARFurniture = false;
     }
 
     private void BeginSelectedFurnitureDrag()
@@ -579,17 +672,108 @@ public class FurniturePlacementManager : MonoBehaviour
         return true;
     }
 
-    private bool IsPointerOverBlockingUI(Vector2 screenPoint, int pointerId)
+    private bool TryMoveSelectedARFurnitureToScreenPoint(Vector2 screenPoint)
     {
-        if (EventSystem.current == null)
+        if (selectedPlacedFurniture == null)
         {
             return false;
         }
 
-        bool overUI = pointerId >= 0
-            ? EventSystem.current.IsPointerOverGameObject(pointerId)
-            : EventSystem.current.IsPointerOverGameObject();
-        if (!overUI)
+        if (arRaycastManager != null &&
+            arRaycastManager.Raycast(screenPoint, arHits, TrackableType.PlaneWithinPolygon))
+        {
+            MoveSelectedARFurniture(arHits[0].pose.position);
+            return true;
+        }
+
+        Camera cam = GetPlacementCamera();
+        if (cam == null)
+        {
+            return false;
+        }
+
+        Ray ray = cam.ScreenPointToRay(screenPoint);
+        Plane dragPlane = new Plane(Vector3.up, selectedPlacedFurniture.transform.position);
+        if (dragPlane.Raycast(ray, out float enter))
+        {
+            MoveSelectedARFurniture(ray.GetPoint(enter));
+            return true;
+        }
+
+        return false;
+    }
+
+    private void MoveSelectedARFurniture(Vector3 position)
+    {
+        if (selectedPlacedFurniture == null)
+        {
+            return;
+        }
+
+        RemoveAnchor(selectedPlacedFurniture);
+        selectedPlacedFurniture.transform.position = position;
+        TryAnchorPlacedFurniture(selectedPlacedFurniture);
+    }
+
+    private bool IsPointerOverBlockingUI(Vector2 screenPoint, int pointerId)
+    {
+        if (IsScreenPointInsideKnownUIBlocker(screenPoint))
+        {
+            return true;
+        }
+
+        return IsPointerOverAnyCanvasGraphic(screenPoint);
+    }
+
+    private bool IsPointerBlockedByUI(Vector2 screenPoint, int pointerId)
+    {
+        return IsPointerOverBlockingUI(screenPoint, pointerId);
+    }
+
+    private static bool IsScreenPointInsideKnownUIBlocker(Vector2 screenPoint)
+    {
+        if (screenPoint.y <= Screen.height * 0.14f)
+        {
+            return true;
+        }
+
+        string[] blockerNames =
+        {
+            "PanelGuardados",
+            "PanelFurniture",
+            "PanelColors",
+            "RuntimeFurniturePanel",
+            "RuntimeColorPanel"
+        };
+
+        foreach (string blockerName in blockerNames)
+        {
+            GameObject blocker = GameObject.Find(blockerName);
+            if (blocker == null || !blocker.activeInHierarchy)
+            {
+                continue;
+            }
+
+            RectTransform rectTransform = blocker.GetComponent<RectTransform>();
+            if (rectTransform != null &&
+                IsReasonablePanelBlocker(rectTransform) &&
+                RectTransformUtility.RectangleContainsScreenPoint(rectTransform, screenPoint))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsPointerOverAnyCanvasGraphic(Vector2 screenPoint)
+    {
+        if (IsScreenPointOverAnySelectable(screenPoint))
+        {
+            return true;
+        }
+
+        if (EventSystem.current == null)
         {
             return false;
         }
@@ -599,8 +783,137 @@ public class FurniturePlacementManager : MonoBehaviour
             position = screenPoint
         };
 
-        List<RaycastResult> results = new List<RaycastResult>();
-        EventSystem.current.RaycastAll(eventData, results);
-        return results.Count > 0;
+        GraphicRaycaster[] raycasters = FindObjectsOfType<GraphicRaycaster>();
+        foreach (GraphicRaycaster raycaster in raycasters)
+        {
+            if (raycaster == null || !raycaster.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            List<RaycastResult> results = new List<RaycastResult>();
+            raycaster.Raycast(eventData, results);
+            if (HasBlockingUIResult(results))
+            {
+                return true;
+            }
+        }
+
+        List<RaycastResult> eventSystemResults = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(eventData, eventSystemResults);
+        return HasBlockingUIResult(eventSystemResults);
+    }
+
+    private static bool IsScreenPointOverAnySelectable(Vector2 screenPoint)
+    {
+        Selectable[] selectables = FindObjectsOfType<Selectable>();
+        foreach (Selectable selectable in selectables)
+        {
+            if (selectable == null || !selectable.IsActive() || !selectable.interactable)
+            {
+                continue;
+            }
+
+            RectTransform rectTransform = selectable.GetComponent<RectTransform>();
+            if (rectTransform != null && RectTransformUtility.RectangleContainsScreenPoint(rectTransform, screenPoint))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasBlockingUIResult(List<RaycastResult> results)
+    {
+        for (int i = 0; i < results.Count; i++)
+        {
+            GameObject hitObject = results[i].gameObject;
+            if (hitObject == null)
+            {
+                continue;
+            }
+
+            if (hitObject.GetComponentInParent<Selectable>() != null)
+            {
+                return true;
+            }
+
+            string objectName = hitObject.name.ToLowerInvariant();
+            if (objectName.Contains("button") ||
+                objectName.Contains("btn") ||
+                objectName.Contains("panel"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsReasonablePanelBlocker(RectTransform rectTransform)
+    {
+        Vector3[] corners = new Vector3[4];
+        rectTransform.GetWorldCorners(corners);
+        float height = Mathf.Abs(corners[1].y - corners[0].y);
+        float width = Mathf.Abs(corners[2].x - corners[1].x);
+
+        return height <= Screen.height * 0.7f && width <= Screen.width * 1.15f;
+    }
+
+    private void TryAnchorPlacedFurniture(GameObject placed)
+    {
+        if (!anchorARPlacedFurniture || placed == null || !UsesARTapPlacement)
+        {
+            return;
+        }
+
+        if (placed.GetComponent<ARAnchor>() == null)
+        {
+            placed.AddComponent<ARAnchor>();
+        }
+    }
+
+    private static void RemoveAnchor(GameObject target)
+    {
+        ARAnchor anchor = target.GetComponent<ARAnchor>();
+        if (anchor != null)
+        {
+            Destroy(anchor);
+        }
+    }
+
+    private static void EnsureSelectableCollider(GameObject instance)
+    {
+        if (instance == null || instance.GetComponentInChildren<Collider>() != null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0)
+        {
+            return;
+        }
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+        {
+            bounds.Encapsulate(renderers[i].bounds);
+        }
+
+        BoxCollider collider = instance.AddComponent<BoxCollider>();
+        collider.center = instance.transform.InverseTransformPoint(bounds.center);
+
+        Vector3 scale = instance.transform.lossyScale;
+        collider.size = new Vector3(
+            SafeDivide(bounds.size.x, scale.x),
+            SafeDivide(bounds.size.y, scale.y),
+            SafeDivide(bounds.size.z, scale.z));
+    }
+
+    private static float SafeDivide(float value, float divisor)
+    {
+        return Mathf.Abs(divisor) > 0.0001f ? value / Mathf.Abs(divisor) : value;
     }
 }

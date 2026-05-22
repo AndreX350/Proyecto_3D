@@ -105,7 +105,7 @@ public class SavedDesignsUI : MonoBehaviour
         }
     }
 
-    private static void BuildList(
+    private void BuildList(
         string[] savedFiles,
         Transform listContent,
         Button itemTemplateButton,
@@ -150,8 +150,67 @@ public class SavedDesignsUI : MonoBehaviour
             if (label != null)
             {
                 label.text = FormatFileLabel(filePath);
+                RectTransform labelRect = label.GetComponent<RectTransform>();
+                if (labelRect != null)
+                {
+                    labelRect.offsetMax = new Vector2(-68f, labelRect.offsetMax.y);
+                }
             }
+
+            CreateDeleteButton(itemButton.transform, filePath);
         }
+    }
+
+    private void CreateDeleteButton(Transform parent, string filePath)
+    {
+        GameObject buttonObject = new GameObject(
+            "BtnDeleteSavedDesign",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Button));
+        buttonObject.transform.SetParent(parent, false);
+
+        RectTransform rectTransform = buttonObject.GetComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(1f, 0.5f);
+        rectTransform.anchorMax = new Vector2(1f, 0.5f);
+        rectTransform.pivot = new Vector2(1f, 0.5f);
+        rectTransform.anchoredPosition = new Vector2(-8f, 0f);
+        rectTransform.sizeDelta = new Vector2(52f, 42f);
+
+        Image image = buttonObject.GetComponent<Image>();
+        image.color = new Color(0.78f, 0.16f, 0.14f, 0.95f);
+        image.raycastTarget = true;
+
+        Button button = buttonObject.GetComponent<Button>();
+        button.onClick.AddListener(() =>
+        {
+            if (DesignSaveManager.DeleteDesign(filePath))
+            {
+                RefreshList();
+            }
+        });
+
+        GameObject labelObject = new GameObject(
+            "Label",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(TextMeshProUGUI));
+        labelObject.transform.SetParent(buttonObject.transform, false);
+
+        RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI label = labelObject.GetComponent<TextMeshProUGUI>();
+        label.text = "X";
+        label.color = Color.white;
+        label.fontSize = 24f;
+        label.fontStyle = FontStyles.Bold;
+        label.alignment = TextAlignmentOptions.Center;
+        label.raycastTarget = false;
     }
 
     private static void ClearGeneratedItems(Transform listContent, Button itemTemplateButton)

@@ -51,6 +51,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void OpenColors()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         bool shouldOpen = panelColors != null && !panelColors.activeSelf;
 
         SetPanelActive(panelColors, shouldOpen);
@@ -59,6 +60,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void OpenFurniture()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         bool shouldOpen = panelFurniture != null && !panelFurniture.activeSelf;
 
         SetPanelActive(panelFurniture, shouldOpen);
@@ -67,6 +69,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void ClearScene()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         if (placementManager != null)
         {
             placementManager.ClearPlacedFurniture();
@@ -76,6 +79,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void SaveDesign()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager para guardar.");
@@ -98,6 +102,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void RotateSelectedFurniture()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -110,6 +115,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void DeleteSelectedFurniture()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -122,6 +128,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void IncreaseSelectedFurnitureScale()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -134,6 +141,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void DecreaseSelectedFurnitureScale()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -146,6 +154,7 @@ public class UIARMAnager : MonoBehaviour
 
     public void ClosePanels()
     {
+        FurniturePlacementManager.BlockWorldInputBriefly();
         SetPanelActive(panelColors, false);
         SetPanelActive(panelFurniture, false);
     }
@@ -194,6 +203,8 @@ public class UIARMAnager : MonoBehaviour
         GameObject bottomMenu = GameObject.Find("BottomMenu");
         if (bottomMenu != null)
         {
+            EnsureRaycastBlockingImage(bottomMenu);
+
             RectTransform bottomRect = bottomMenu.GetComponent<RectTransform>();
             if (bottomRect != null)
             {
@@ -205,6 +216,7 @@ public class UIARMAnager : MonoBehaviour
         GameObject buttonsContainer = GameObject.Find("BottomsContainer");
         if (buttonsContainer != null)
         {
+            EnsureRaycastBlockingImage(buttonsContainer);
             bottomButtonsContainer = buttonsContainer.transform;
         }
     }
@@ -366,6 +378,7 @@ public class UIARMAnager : MonoBehaviour
             Button button = CreateTextButton(panelFurniture.transform, item.itemName);
             button.onClick.AddListener(() =>
             {
+                FurniturePlacementManager.BlockWorldInputBriefly();
                 if (placementManager == null)
                 {
                     Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -398,6 +411,7 @@ public class UIARMAnager : MonoBehaviour
             image.color = color;
             button.onClick.AddListener(() =>
             {
+                FurniturePlacementManager.BlockWorldInputBriefly();
                 if (roomColorManager == null)
                 {
                     Debug.LogWarning("UIARMAnager: falta RoomColorManager.");
@@ -449,7 +463,7 @@ public class UIARMAnager : MonoBehaviour
         if (image != null)
         {
             image.color = new Color(0.08f, 0.09f, 0.10f, 0.92f);
-            image.raycastTarget = false;
+            image.raycastTarget = true;
         }
 
         GridLayoutGroup grid = panel.GetComponent<GridLayoutGroup>();
@@ -465,6 +479,18 @@ public class UIARMAnager : MonoBehaviour
         grid.constraint = GridLayoutGroup.Constraint.Flexible;
 
         panel.transform.SetAsLastSibling();
+    }
+
+    private void EnsureRaycastBlockingImage(GameObject target)
+    {
+        Image image = target.GetComponent<Image>();
+        if (image == null)
+        {
+            image = target.AddComponent<Image>();
+            image.color = new Color(0f, 0f, 0f, 0f);
+        }
+
+        image.raycastTarget = true;
     }
 
     private void ClearPanelChildren(Transform panelTransform)
