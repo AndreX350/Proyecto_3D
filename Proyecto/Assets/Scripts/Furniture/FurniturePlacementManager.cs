@@ -83,6 +83,7 @@ public class FurniturePlacementManager : MonoBehaviour
     private bool isDraggingSelectedFurniture;
     private bool isDraggingARFurniture;
     private Plane selectedDragPlane;
+    private GameObject selectionVisual;
     public IReadOnlyList<GameObject> PlacedFurniture => placedFurniture;
     public bool UsesARTapPlacement => enableARPlacement && arRaycastManager != null;
 
@@ -251,9 +252,9 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        if (TryMoveSelectedFurnitureToScreenPoint(screenPoint))
+        if (selectedPlacedFurniture != null)
         {
-            BeginSelectedFurnitureDrag();
+            ClearSelectedFurniture();
         }
     }
 
@@ -435,7 +436,6 @@ public class FurniturePlacementManager : MonoBehaviour
 
         placedFurniture.Add(instance);
         lastPlacedFurniture = instance;
-        SetSelectedFurniture(instance);
         return instance;
     }
 
@@ -533,6 +533,7 @@ public class FurniturePlacementManager : MonoBehaviour
 
     public void ClearPlacedFurniture()
     {
+        DestroySelectionVisual();
         for (int i = placedFurniture.Count - 1; i >= 0; i--)
         {
             if (placedFurniture[i] != null)
@@ -601,16 +602,83 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
+        DestroySelectionVisual();
         selectedPlacedFurniture = target;
         lastPlacedFurniture = target;
+        CreateSelectionVisual(target);
         Debug.Log("Selected placed furniture: " + selectedPlacedFurniture.name);
     }
 
     private void ClearSelectedFurniture()
     {
+        DestroySelectionVisual();
         selectedPlacedFurniture = null;
         isDraggingSelectedFurniture = false;
         isDraggingARFurniture = false;
+    }
+
+    private void CreateSelectionVisual(GameObject target)
+    {
+        DestroySelectionVisual();
+
+        selectionVisual = new GameObject("SelectionVisual");
+        selectionVisual.transform.SetParent(target.transform, false);
+        selectionVisual.transform.localPosition = new Vector3(0f, 0.02f, 0f);
+
+        MeshFilter meshFilter = selectionVisual.AddComponent<MeshFilter>();
+        MeshRenderer meshRenderer = selectionVisual.AddComponent<MeshRenderer>();
+
+        Mesh mesh = new Mesh();
+        mesh.name = "SelectionQuadMesh";
+        mesh.vertices = new Vector3[]
+        {
+            new Vector3(-0.5f, 0f, -0.5f),
+            new Vector3(0.5f, 0f, -0.5f),
+            new Vector3(-0.5f, 0f, 0.5f),
+            new Vector3(0.5f, 0f, 0.5f)
+        };
+        mesh.triangles = new int[] { 0, 2, 1, 2, 3, 1 };
+        mesh.normals = new Vector3[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+        mesh.uv = new Vector2[]
+        {
+            new Vector2(0f, 0f), new Vector2(1f, 0f),
+            new Vector2(0f, 1f), new Vector2(1f, 1f)
+        };
+        meshFilter.mesh = mesh;
+
+        Material mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        if (mat.shader == null)
+            mat = new Material(Shader.Find("Standard"));
+        mat.color = new Color(1f, 0.84f, 0f, 0.35f);
+        mat.SetFloat("_Surface", 1f);
+        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        mat.renderQueue = 3000;
+        meshRenderer.material = mat;
+
+        Renderer targetRenderer = target.GetComponentInChildren<Renderer>();
+        if (targetRenderer != null)
+        {
+            float size = Mathf.Max(targetRenderer.bounds.size.x, targetRenderer.bounds.size.z) * 1.0f;
+            size = Mathf.Clamp(size, 0.5f, 2.5f);
+            Vector3 localScale = target.transform.lossyScale;
+            selectionVisual.transform.localScale = new Vector3(
+                Mathf.Abs(localScale.x) > 0.001f ? size / localScale.x : 1f,
+                1f,
+                Mathf.Abs(localScale.z) > 0.001f ? size / localScale.z : 1f);
+        }
+        else
+        {
+            selectionVisual.transform.localScale = new Vector3(0.7f, 1f, 0.7f);
+        }
+    }
+
+    private void DestroySelectionVisual()
+    {
+        if (selectionVisual != null)
+        {
+            Destroy(selectionVisual);
+            selectionVisual = null;
+        }
     }
 
     private void BeginSelectedFurnitureDrag()

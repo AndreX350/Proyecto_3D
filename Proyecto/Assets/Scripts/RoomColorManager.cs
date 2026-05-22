@@ -22,7 +22,8 @@ public class RoomColorManager : MonoBehaviour
     {
         "wall_back",
         "wall_left",
-        "wall_right"
+        "wall_right",
+        "wall_front"
     };
 
     private void Awake()

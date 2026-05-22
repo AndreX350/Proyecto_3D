@@ -216,4 +216,11 @@ public class RoomDemoCameraController : MonoBehaviour
     {
         return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(fingerId);
     }
+
+    public void SetLookSensitivity(float sensitivity)
+    {
+        float safe = Mathf.Max(0.01f, sensitivity);
+        mouseLookSensitivity = safe;
+        touchLookSensitivity = safe * 0.07f;
+    }
 }
