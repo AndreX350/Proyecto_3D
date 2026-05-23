@@ -29,6 +29,16 @@ public class RoomDemoCameraController : MonoBehaviour
     [SerializeField]
     private float maxPitch = 35f;
 
+    [Header("Mobile UI Controls")]
+    [SerializeField]
+    private bool useMobileUiControls = true;
+
+    [SerializeField]
+    private SimpleJoystick movementJoystick;
+
+    [SerializeField]
+    private TouchLookArea touchLookArea;
+
     [Header("Room Bounds")]
     [SerializeField]
     private bool clampToRoomBounds = true;
@@ -102,6 +112,17 @@ public class RoomDemoCameraController : MonoBehaviour
 
     private void UpdateTouchLook()
     {
+        if (useMobileUiControls && touchLookArea != null)
+        {
+            Vector2 uiDelta = touchLookArea.LookDelta;
+            if (uiDelta.sqrMagnitude > 0.0001f)
+            {
+                ApplyLookDelta(uiDelta.x * touchLookSensitivity, -uiDelta.y * touchLookSensitivity);
+            }
+
+            return;
+        }
+
         if (Input.touchCount != 1)
         {
             return;
@@ -148,6 +169,17 @@ public class RoomDemoCameraController : MonoBehaviour
 
     private void UpdateTouchMovement()
     {
+        if (useMobileUiControls && movementJoystick != null)
+        {
+            Vector2 stick = movementJoystick.Input;
+            if (stick.sqrMagnitude > 0.0001f)
+            {
+                MoveByInput(new Vector3(stick.x, 0f, stick.y), moveSpeed);
+            }
+
+            return;
+        }
+
         if (Input.touchCount < 2)
         {
             return;
