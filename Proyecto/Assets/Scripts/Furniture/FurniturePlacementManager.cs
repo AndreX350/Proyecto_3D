@@ -55,6 +55,18 @@ public class FurniturePlacementManager : MonoBehaviour
     private float estimatedSurfaceUpDotThreshold = 0.72f;
 
     [SerializeField]
+    private bool useGridSnapForAR = true;
+
+    [SerializeField]
+    private float arGridSize = 0.1f;
+
+    [SerializeField]
+    private float maxARPlacementDistance = 5f;
+
+    [SerializeField]
+    private bool preventPlacementOnCollision = true;
+
+    [SerializeField]
     private Camera placementCamera;
 
     [SerializeField]
@@ -222,7 +234,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         Touch touch = Input.GetTouch(0);
-        if (IsPointerOverBlockingUI(touch.position, touch.fingerId))
+        if (blockPlacementWhenPointerOverUI && IsPointerOverBlockingUI(touch.position, touch.fingerId))
         {
             ARDiagnostics.Report("Tap bloqueado por UI.");
             isDraggingARFurniture = false;
@@ -289,7 +301,7 @@ public class FurniturePlacementManager : MonoBehaviour
             }
             else if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
             {
-                if (IsPointerBlockedByUI(touch.position, touch.fingerId))
+                if (blockRoomEditingWhenPointerOverUI && IsPointerBlockedByUI(touch.position, touch.fingerId))
                 {
                     isDraggingSelectedFurniture = false;
                     return;
@@ -311,7 +323,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
         else if (Input.GetMouseButton(0))
         {
-            if (IsPointerBlockedByUI(Input.mousePosition, -1))
+            if (blockRoomEditingWhenPointerOverUI && IsPointerBlockedByUI(Input.mousePosition, -1))
             {
                 isDraggingSelectedFurniture = false;
                 return;
@@ -460,8 +472,36 @@ public class FurniturePlacementManager : MonoBehaviour
 
         Pose hitPose = horizontalHit.pose;
         Vector3 position = hitPose.position + selectedFurniture.placementOffset;
+        if (!IsWithinPlacementDistance(position))
+        {
+            ARDiagnostics.Report("No se puede colocar: demasiado lejos de la camara.");
+            return false;
+        }
+
+        if (useGridSnapForAR)
+        {
+            position = SnapPositionToGrid(position);
+        }
+
         Quaternion rotation = Quaternion.Euler(0f, hitPose.rotation.eulerAngles.y, 0f);
         GameObject placed = PlaceFurnitureAt(selectedFurniture, position, rotation);
+        if (placed == null)
+        {
+            return false;
+        }
+
+        if (preventPlacementOnCollision && IsPlacementColliding(placed))
+        {
+            ARDiagnostics.Report("No se coloco: colision con otro mueble.");
+            DestroyPlacedFurniture(placed);
+            placedFurniture.Remove(placed);
+            if (lastPlacedFurniture == placed)
+            {
+                lastPlacedFurniture = null;
+            }
+            return false;
+        }
+
         TryAnchorPlacedFurniture(placed, hitPlane, new Pose(position, rotation));
         selectedFurniture = null;
         SetSelectedFurniture(placed);
@@ -887,9 +927,28 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
+        if (useGridSnapForAR)
+        {
+            position = SnapPositionToGrid(position);
+        }
+
+        if (!IsWithinPlacementDistance(position))
+        {
+            ARDiagnostics.Report("Movimiento AR cancelado: destino lejos de la camara.");
+            return;
+        }
+
         Quaternion rotation = selectedPlacedFurniture.transform.rotation;
+        Vector3 previousPosition = selectedPlacedFurniture.transform.position;
         RemoveAnchor(selectedPlacedFurniture);
         selectedPlacedFurniture.transform.position = position;
+        if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
+        {
+            selectedPlacedFurniture.transform.position = previousPosition;
+            ARDiagnostics.Report("Movimiento AR cancelado: colision detectada.");
+            return;
+        }
+
         TryAnchorPlacedFurniture(selectedPlacedFurniture, hitPlane, new Pose(position, rotation));
     }
 
@@ -1332,5 +1391,65 @@ public class FurniturePlacementManager : MonoBehaviour
     private static float SafeDivide(float value, float divisor)
     {
         return Mathf.Abs(divisor) > 0.0001f ? value / Mathf.Abs(divisor) : value;
+    }
+
+    private bool IsWithinPlacementDistance(Vector3 worldPosition)
+    {
+        Camera cam = GetPlacementCamera();
+        if (cam == null)
+        {
+            return true;
+        }
+
+        return Vector3.Distance(cam.transform.position, worldPosition) <= maxARPlacementDistance;
+    }
+
+    private Vector3 SnapPositionToGrid(Vector3 worldPosition)
+    {
+        float safeGrid = Mathf.Max(0.01f, arGridSize);
+        worldPosition.x = Mathf.Round(worldPosition.x / safeGrid) * safeGrid;
+        worldPosition.z = Mathf.Round(worldPosition.z / safeGrid) * safeGrid;
+        return worldPosition;
+    }
+
+    private bool IsPlacementColliding(GameObject target)
+    {
+        Collider[] colliders = target.GetComponentsInChildren<Collider>();
+        if (colliders == null || colliders.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (Collider collider in colliders)
+        {
+            if (collider == null)
+            {
+                continue;
+            }
+
+            Bounds bounds = collider.bounds;
+            Vector3 halfExtents = bounds.extents * 0.96f;
+            Collider[] overlaps = Physics.OverlapBox(bounds.center, halfExtents, collider.transform.rotation, placedFurnitureLayerMask);
+            foreach (Collider overlap in overlaps)
+            {
+                if (overlap == null)
+                {
+                    continue;
+                }
+
+                if (overlap.transform.IsChildOf(target.transform))
+                {
+                    continue;
+                }
+
+                GameObject placedRoot = GetPlacedFurnitureRoot(overlap.transform);
+                if (placedRoot != null && placedRoot != target)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

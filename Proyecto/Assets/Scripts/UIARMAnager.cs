@@ -26,6 +26,7 @@ public class UIARMAnager : MonoBehaviour
     private float panelBottomOffset = 248f;
     private Transform bottomButtonsContainer;
     private bool isPrimaryManager = true;
+    private TextMeshProUGUI wallStatusText;
 
     private readonly Color[] wallColors =
     {
@@ -70,6 +71,7 @@ public class UIARMAnager : MonoBehaviour
 
         SetPanelActive(panelColors, shouldOpen);
         SetPanelActive(panelFurniture, false);
+        UpdateWallStatusText();
     }
 
     public void OpenFurniture()
@@ -627,9 +629,26 @@ public class UIARMAnager : MonoBehaviour
                     return;
                 }
 
-                roomColorManager.ApplyWallColor(color);
+                roomColorManager.QueueWallColor(color);
+                UpdateWallStatusText();
             });
         }
+
+        Button applyButton = CreateTextButton(panelColors.transform, "APLICAR");
+        applyButton.name = "BtnApplyWallColor";
+        applyButton.onClick.AddListener(() =>
+        {
+            FurniturePlacementManager.BlockWorldInputBriefly();
+            if (roomColorManager == null)
+            {
+                return;
+            }
+
+            roomColorManager.ApplyPendingWallColor();
+            UpdateWallStatusText();
+        });
+
+        CreateOrRefreshWallStatusText();
     }
 
     private GameObject CreateRuntimePanel(Transform parent, string panelName, float height)
@@ -751,5 +770,51 @@ public class UIARMAnager : MonoBehaviour
         }
 
         return button;
+    }
+
+    private void CreateOrRefreshWallStatusText()
+    {
+        if (panelColors == null)
+        {
+            return;
+        }
+
+        if (wallStatusText == null)
+        {
+            GameObject statusObject = new GameObject(
+                "TxtWallStatus",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI),
+                typeof(LayoutElement));
+            statusObject.transform.SetParent(panelColors.transform, false);
+
+            RectTransform rectTransform = statusObject.GetComponent<RectTransform>();
+            rectTransform.sizeDelta = new Vector2(220f, 56f);
+
+            LayoutElement layoutElement = statusObject.GetComponent<LayoutElement>();
+            layoutElement.preferredWidth = 220f;
+            layoutElement.preferredHeight = 56f;
+
+            wallStatusText = statusObject.GetComponent<TextMeshProUGUI>();
+            wallStatusText.color = Color.white;
+            wallStatusText.fontSize = 19f;
+            wallStatusText.alignment = TextAlignmentOptions.Center;
+            wallStatusText.enableWordWrapping = true;
+        }
+
+        UpdateWallStatusText();
+    }
+
+    private void UpdateWallStatusText()
+    {
+        if (wallStatusText == null || roomColorManager == null)
+        {
+            return;
+        }
+
+        string selectedLabel = roomColorManager.GetSelectedWallShortName();
+        string pendingLabel = roomColorManager.HasPendingWallColor() ? "Color pendiente" : "Sin color pendiente";
+        wallStatusText.text = selectedLabel + "\n" + pendingLabel;
     }
 }

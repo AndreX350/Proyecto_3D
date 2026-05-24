@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 
@@ -14,6 +15,15 @@ public class RoomColorManager : MonoBehaviour
     [SerializeField]
     private float minimumARWallSize = 0.25f;
 
+    [SerializeField]
+    private float selectedWallBoostDuration = 0.8f;
+
+    [SerializeField]
+    private float selectedWallBoostMultiplier = 1.45f;
+
+    [SerializeField]
+    private bool requireExplicitApplyInAR = true;
+
     private Color currentWallColor = Color.white;
     private bool hasCurrentWallColor;
     private readonly Dictionary<ARPlane, Renderer> arWallOverlays = new Dictionary<ARPlane, Renderer>();
@@ -21,6 +31,9 @@ public class RoomColorManager : MonoBehaviour
     private ARRaycastManager arRaycastManager;
     private ARPlaneManager arPlaneManager;
     private ARPlane selectedARWall;
+    private float selectedWallBoostUntil;
+    private Color pendingWallColor = Color.white;
+    private bool hasPendingWallColor;
 
     private static readonly HashSet<string> AllowedWallNames = new HashSet<string>
     {
@@ -51,21 +64,20 @@ public class RoomColorManager : MonoBehaviour
 
         int previousCount = wallRenderers.Count;
         AddDetectedARWalls();
-        if (selectedARWall != null)
-        {
-            return;
-        }
 
         for (int i = previousCount; i < wallRenderers.Count; i++)
         {
             ApplyColorToRenderer(wallRenderers[i], currentWallColor);
         }
+
+        UpdateSelectedWallVisuals();
     }
 
     public void ApplyWallColor(Color color)
     {
         currentWallColor = color;
         hasCurrentWallColor = true;
+        hasPendingWallColor = false;
 
         if (wallRenderers.Count == 0)
         {
@@ -95,6 +107,43 @@ public class RoomColorManager : MonoBehaviour
 
         Debug.Log("Color de pared aplicado.");
     }
+
+    public void QueueWallColor(Color color)
+    {
+        if (ShouldRequireExplicitApply())
+        {
+            pendingWallColor = color;
+            hasPendingWallColor = true;
+            ARDiagnostics.Report("Color en espera. Toca APLICAR para pintar la pared.");
+            return;
+        }
+
+        ApplyWallColor(color);
+    }
+
+    public void ApplyPendingWallColor()
+    {
+        if (!hasPendingWallColor)
+        {
+            ARDiagnostics.Report("No hay color pendiente para aplicar.");
+            return;
+        }
+
+        ApplyWallColor(pendingWallColor);
+        ARDiagnostics.Report("Color aplicado a pared.");
+    }
+
+    public string GetSelectedWallShortName()
+    {
+        if (selectedARWall != null)
+        {
+            return "Pared AR seleccionada";
+        }
+
+        return "Sin pared seleccionada";
+    }
+
+    public bool HasPendingWallColor() => hasPendingWallColor;
 
     public bool TrySelectWallAtScreenPoint(Vector2 screenPoint)
     {
@@ -132,6 +181,9 @@ public class RoomColorManager : MonoBehaviour
                 ApplyColorToRenderer(renderer, currentWallColor);
             }
 
+            selectedWallBoostUntil = Time.unscaledTime + selectedWallBoostDuration;
+            UpdateSelectedWallVisuals();
+
             Debug.Log("Pared AR seleccionada para color.");
             ARDiagnostics.Report("Pared AR vertical detectada y seleccionada.");
             return true;
@@ -144,6 +196,8 @@ public class RoomColorManager : MonoBehaviour
     public void ClearSelectedWall()
     {
         selectedARWall = null;
+        selectedWallBoostUntil = 0f;
+        UpdateSelectedWallVisuals();
     }
 
     public bool TryGetCurrentWallColor(out Color color)
@@ -333,6 +387,48 @@ public class RoomColorManager : MonoBehaviour
         ConfigureMaterialForColor(wallMaterial, appliedColor, isARWall);
     }
 
+    private void UpdateSelectedWallVisuals()
+    {
+        if (arWallOverlays.Count == 0)
+        {
+            return;
+        }
+
+        bool boostActive = Time.unscaledTime <= selectedWallBoostUntil;
+        foreach (KeyValuePair<ARPlane, Renderer> pair in arWallOverlays)
+        {
+            Renderer renderer = pair.Value;
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Color baseColor = hasCurrentWallColor ? currentWallColor : Color.white;
+            bool isSelected = selectedARWall != null && pair.Key == selectedARWall;
+            float alpha = arWallOverlayAlpha;
+            Color tinted = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
+
+            if (isSelected)
+            {
+                if (boostActive)
+                {
+                    tinted = new Color(
+                        Mathf.Clamp01(baseColor.r * selectedWallBoostMultiplier),
+                        Mathf.Clamp01(baseColor.g * selectedWallBoostMultiplier),
+                        Mathf.Clamp01(baseColor.b * selectedWallBoostMultiplier),
+                        Mathf.Clamp01(alpha + 0.22f));
+                }
+                else
+                {
+                    tinted = new Color(baseColor.r, baseColor.g, baseColor.b, Mathf.Clamp01(alpha + 0.12f));
+                }
+            }
+
+            Material material = renderer.material;
+            ConfigureMaterialForColor(material, tinted, true);
+        }
+    }
+
     private Material CreateARWallMaterial(Color color)
     {
         Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
@@ -381,5 +477,15 @@ public class RoomColorManager : MonoBehaviour
         {
             material.SetFloat(propertyName, value);
         }
+    }
+
+    private bool ShouldRequireExplicitApply()
+    {
+        if (!requireExplicitApplyInAR)
+        {
+            return false;
+        }
+
+        return SceneManager.GetActiveScene().name == "ARScene";
     }
 }

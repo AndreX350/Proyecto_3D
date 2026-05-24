@@ -4,8 +4,11 @@ using System.Collections.Generic;
 [Serializable]
 public class DesignSaveData
 {
+    public int schemaVersion = 2;
     public string savedAt;
     public string sourceScene;
+    public string appVersion;
+    public string unityVersion;
     public bool hasWallColor;
     public float wallColorR;
     public float wallColorG;

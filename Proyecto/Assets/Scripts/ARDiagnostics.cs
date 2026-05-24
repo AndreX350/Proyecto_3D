@@ -3,10 +3,11 @@ using UnityEngine;
 
 public static class ARDiagnostics
 {
+    private static bool runtimeEnabled = Debug.isDebugBuild;
     private static string lastStatus = "Sin eventos AR aun.";
     private static float lastStatusTime;
 
-    public static bool Enabled => Debug.isDebugBuild;
+    public static bool Enabled => runtimeEnabled;
 
     public static string LastStatus => lastStatus;
 
@@ -20,6 +21,19 @@ public static class ARDiagnostics
         lastStatus = status;
         lastStatusTime = Time.unscaledTime;
         Debug.Log("[AR-DEBUG] " + status);
+    }
+
+    public static bool ToggleRuntimeEnabled()
+    {
+        runtimeEnabled = !runtimeEnabled;
+        Report("AR DEBUG " + (runtimeEnabled ? "ACTIVADO" : "DESACTIVADO"));
+        return runtimeEnabled;
+    }
+
+    public static void SetRuntimeEnabled(bool enabled)
+    {
+        runtimeEnabled = enabled;
+        Report("AR DEBUG " + (runtimeEnabled ? "ACTIVADO" : "DESACTIVADO"));
     }
 
     public static string BuildOverlayText(

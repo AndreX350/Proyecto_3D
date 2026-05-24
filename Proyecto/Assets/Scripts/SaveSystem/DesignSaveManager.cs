@@ -24,6 +24,8 @@ public class DesignSaveManager : MonoBehaviour
         DesignSaveData saveData = new DesignSaveData();
         saveData.savedAt = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         saveData.sourceScene = SceneManager.GetActiveScene().name;
+        saveData.appVersion = Application.version;
+        saveData.unityVersion = Application.unityVersion;
 
         if (roomColorManager != null && roomColorManager.TryGetCurrentWallColor(out Color wallColor))
         {
@@ -240,6 +242,16 @@ public class DesignSaveManager : MonoBehaviour
             FurnitureItemData catalogItem = catalog.GetItemByName(savedItem.itemName);
             if (catalogItem == null)
             {
+                catalogItem = catalog.FindClosestByName(savedItem.itemName);
+                if (catalogItem != null)
+                {
+                    Debug.LogWarning("DesignSaveManager: se recupero mueble por nombre similar: " + savedItem.itemName + " -> " + catalogItem.itemName);
+                }
+            }
+
+            if (catalogItem == null)
+            {
+                Debug.LogWarning("DesignSaveManager: se omite mueble faltante en catalogo: " + savedItem.itemName);
                 continue;
             }
 

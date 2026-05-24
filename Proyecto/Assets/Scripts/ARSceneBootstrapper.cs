@@ -89,10 +89,22 @@ public class ARSceneBootstrapper : MonoBehaviour
         SetOriginCamera(origin, arCamera);
         SetOriginCameraOffset(origin, cameraOffset);
         AddComponentIfMissing(originObject, typeof(ARSurfaceDetectionManager));
+        EnsureRuntimeUXManager();
         EnsureARDebugOverlay();
         DisableDuplicateCameras(arCamera);
         Debug.Log("ARSceneBootstrapper: AR Foundation rig listo.");
         return true;
+    }
+
+    private static void EnsureRuntimeUXManager()
+    {
+        if (FindObjectOfType<ARRuntimeUXManager>() != null)
+        {
+            return;
+        }
+
+        GameObject managerObject = new GameObject("ARRuntimeUXManager");
+        managerObject.AddComponent<ARRuntimeUXManager>();
     }
 
     private static void EnsureARDebugOverlay()

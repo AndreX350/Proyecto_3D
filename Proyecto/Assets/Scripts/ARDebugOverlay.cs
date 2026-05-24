@@ -19,12 +19,6 @@ public class ARDebugOverlay : MonoBehaviour
 
     private void Awake()
     {
-        if (!ARDiagnostics.Enabled)
-        {
-            enabled = false;
-            return;
-        }
-
         if (placementManager == null)
         {
             placementManager = FindObjectOfType<FurniturePlacementManager>();
@@ -56,7 +50,7 @@ public class ARDebugOverlay : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!showOverlay || string.IsNullOrEmpty(cachedText))
+        if (!showOverlay || !ARDiagnostics.Enabled || string.IsNullOrEmpty(cachedText))
         {
             return;
         }

@@ -43,6 +43,31 @@ public class FurnitureCatalog : MonoBehaviour
         return null;
     }
 
+    public FurnitureItemData FindClosestByName(string itemName)
+    {
+        if (string.IsNullOrEmpty(itemName) || items == null)
+        {
+            return null;
+        }
+
+        string requested = itemName.ToLowerInvariant().Replace(" ", string.Empty).Replace("_", string.Empty);
+        foreach (FurnitureItemData item in items)
+        {
+            if (item == null || string.IsNullOrEmpty(item.itemName))
+            {
+                continue;
+            }
+
+            string candidate = item.itemName.ToLowerInvariant().Replace(" ", string.Empty).Replace("_", string.Empty);
+            if (candidate.Contains(requested) || requested.Contains(candidate))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
     public List<FurnitureItemData> GetItemsByCategory(FurnitureCategory category)
     {
         List<FurnitureItemData> result = new List<FurnitureItemData>();
