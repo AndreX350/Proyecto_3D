@@ -72,20 +72,23 @@ public class ARSceneBootstrapper : MonoBehaviour
         {
             Component planeManager = AddComponentIfMissing(originObject, arPlaneManagerType);
             SetPlaneDetectionMode(planeManager);
+            ClearPlanePrefab(planeManager);
+            EnableComponent(planeManager);
         }
 
         if (arRaycastManagerType != null)
         {
-            AddComponentIfMissing(originObject, arRaycastManagerType);
+            EnableComponent(AddComponentIfMissing(originObject, arRaycastManagerType));
         }
 
         if (arAnchorManagerType != null)
         {
-            AddComponentIfMissing(originObject, arAnchorManagerType);
+            EnableComponent(AddComponentIfMissing(originObject, arAnchorManagerType));
         }
 
         SetOriginCamera(origin, arCamera);
         SetOriginCameraOffset(origin, cameraOffset);
+        AddComponentIfMissing(originObject, typeof(ARSurfaceDetectionManager));
         DisableDuplicateCameras(arCamera);
         Debug.Log("ARSceneBootstrapper: AR Foundation rig listo.");
         return true;
@@ -188,6 +191,15 @@ public class ARSceneBootstrapper : MonoBehaviour
         return componentType != null && target.GetComponent(componentType) != null;
     }
 
+    private static void EnableComponent(Component component)
+    {
+        Behaviour behaviour = component as Behaviour;
+        if (behaviour != null)
+        {
+            behaviour.enabled = true;
+        }
+    }
+
     private static void DisableDuplicateCameras(Camera arCamera)
     {
         foreach (Camera camera in FindObjectsOfType<Camera>(true))
@@ -257,6 +269,20 @@ public class ARSceneBootstrapper : MonoBehaviour
         if (requestedDetectionModeProperty != null && requestedDetectionModeProperty.CanWrite)
         {
             requestedDetectionModeProperty.SetValue(planeManager, horizontalAndVertical);
+        }
+    }
+
+    private static void ClearPlanePrefab(Component planeManager)
+    {
+        if (planeManager == null)
+        {
+            return;
+        }
+
+        PropertyInfo planePrefabProperty = planeManager.GetType().GetProperty("planePrefab");
+        if (planePrefabProperty != null && planePrefabProperty.CanWrite)
+        {
+            planePrefabProperty.SetValue(planeManager, null);
         }
     }
 }

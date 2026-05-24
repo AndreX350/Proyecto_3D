@@ -17,6 +17,10 @@ public class RoomColorManager : MonoBehaviour
     private Color currentWallColor = Color.white;
     private bool hasCurrentWallColor;
     private readonly Dictionary<ARPlane, Renderer> arWallOverlays = new Dictionary<ARPlane, Renderer>();
+    private readonly List<ARRaycastHit> arHits = new List<ARRaycastHit>();
+    private ARRaycastManager arRaycastManager;
+    private ARPlaneManager arPlaneManager;
+    private ARPlane selectedARWall;
 
     private static readonly HashSet<string> AllowedWallNames = new HashSet<string>
     {
@@ -28,6 +32,8 @@ public class RoomColorManager : MonoBehaviour
 
     private void Awake()
     {
+        ResolveARManagers();
+
         if (wallRenderers.Count == 0)
         {
             FindWallsInScene();
@@ -41,8 +47,15 @@ public class RoomColorManager : MonoBehaviour
             return;
         }
 
+        ResolveARManagers();
+
         int previousCount = wallRenderers.Count;
         AddDetectedARWalls();
+        if (selectedARWall != null)
+        {
+            return;
+        }
+
         for (int i = previousCount; i < wallRenderers.Count; i++)
         {
             ApplyColorToRenderer(wallRenderers[i], currentWallColor);
@@ -67,12 +80,66 @@ public class RoomColorManager : MonoBehaviour
             return;
         }
 
+        Renderer selectedWallRenderer = GetSelectedWallRenderer();
+        if (selectedWallRenderer != null)
+        {
+            ApplyColorToRenderer(selectedWallRenderer, color);
+            Debug.Log("Color aplicado a pared AR seleccionada.");
+            return;
+        }
+
         foreach (Renderer wallRenderer in wallRenderers)
         {
             ApplyColorToRenderer(wallRenderer, color);
         }
 
         Debug.Log("Color de pared aplicado.");
+    }
+
+    public bool TrySelectWallAtScreenPoint(Vector2 screenPoint)
+    {
+        ResolveARManagers();
+
+        if (arRaycastManager == null || arPlaneManager == null)
+        {
+            return false;
+        }
+
+        if (!arRaycastManager.Raycast(screenPoint, arHits, TrackableType.PlaneWithinPolygon))
+        {
+            return false;
+        }
+
+        foreach (ARRaycastHit hit in arHits)
+        {
+            ARPlane plane = arPlaneManager.GetPlane(hit.trackableId);
+            if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+            {
+                continue;
+            }
+
+            selectedARWall = plane;
+            Renderer renderer = EnsureARWallOverlay(plane);
+            if (renderer != null && !wallRenderers.Contains(renderer))
+            {
+                wallRenderers.Add(renderer);
+            }
+
+            if (hasCurrentWallColor && renderer != null)
+            {
+                ApplyColorToRenderer(renderer, currentWallColor);
+            }
+
+            Debug.Log("Pared AR seleccionada para color.");
+            return true;
+        }
+
+        return false;
+    }
+
+    public void ClearSelectedWall()
+    {
+        selectedARWall = null;
     }
 
     public bool TryGetCurrentWallColor(out Color color)
@@ -134,6 +201,19 @@ public class RoomColorManager : MonoBehaviour
         AddDetectedARWalls();
     }
 
+    private void ResolveARManagers()
+    {
+        if (arRaycastManager == null)
+        {
+            arRaycastManager = FindObjectOfType<ARRaycastManager>();
+        }
+
+        if (arPlaneManager == null)
+        {
+            arPlaneManager = FindObjectOfType<ARPlaneManager>();
+        }
+    }
+
     private void AddDetectedARWalls()
     {
         ARPlane[] planes = FindObjectsOfType<ARPlane>();
@@ -170,6 +250,21 @@ public class RoomColorManager : MonoBehaviour
 
         arWallOverlays[plane] = renderer;
         return renderer;
+    }
+
+    private Renderer GetSelectedWallRenderer()
+    {
+        if (selectedARWall == null)
+        {
+            return null;
+        }
+
+        if (arWallOverlays.TryGetValue(selectedARWall, out Renderer renderer) && renderer != null)
+        {
+            return renderer;
+        }
+
+        return EnsureARWallOverlay(selectedARWall);
     }
 
     private void UpdateARWallOverlayMesh(ARPlane plane, MeshFilter meshFilter)

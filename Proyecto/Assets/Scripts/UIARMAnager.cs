@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UnityEngine.SceneManagement;
+using System.Collections.Generic;
 
 public class UIARMAnager : MonoBehaviour
 {
@@ -23,6 +25,7 @@ public class UIARMAnager : MonoBehaviour
     private const float PanelGap = 12f;
     private float panelBottomOffset = 248f;
     private Transform bottomButtonsContainer;
+    private bool isPrimaryManager = true;
 
     private readonly Color[] wallColors =
     {
@@ -36,22 +39,33 @@ public class UIARMAnager : MonoBehaviour
 
     private void Start()
     {
+        isPrimaryManager = IsPrimaryManager();
+        if (!isPrimaryManager)
+        {
+            return;
+        }
+
         ResolveRuntimeLinks();
         ResolveBottomMenuLayout();
+        WireSceneButtons();
         EnsureRuntimePanels();
-        EnsureRotateButton();
-        EnsureDeleteButton();
+        EnsureActionButtons();
         EnsureScaleButtons();
         BuildFurniturePanel();
         BuildColorPanel();
         ClosePanels();
-        DesignSaveManager.TryLoadPendingRoomDemoDesign(furnitureCatalog, placementManager, roomColorManager);
-        DesignSaveManager.TryLoadPendingARDesign(furnitureCatalog, placementManager, roomColorManager);
+        LoadPendingDesignForActiveScene();
     }
 
     public void OpenColors()
     {
+        if (ForwardToPrimary(manager => manager.OpenColors()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        EnsurePanelsReady();
         bool shouldOpen = panelColors != null && !panelColors.activeSelf;
 
         SetPanelActive(panelColors, shouldOpen);
@@ -60,7 +74,13 @@ public class UIARMAnager : MonoBehaviour
 
     public void OpenFurniture()
     {
+        if (ForwardToPrimary(manager => manager.OpenFurniture()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        EnsurePanelsReady();
         bool shouldOpen = panelFurniture != null && !panelFurniture.activeSelf;
 
         SetPanelActive(panelFurniture, shouldOpen);
@@ -69,7 +89,14 @@ public class UIARMAnager : MonoBehaviour
 
     public void ClearScene()
     {
+        if (ForwardToPrimary(manager => manager.ClearScene()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        ResolveRuntimeLinks();
+
         if (placementManager != null)
         {
             placementManager.ClearPlacedFurniture();
@@ -79,7 +106,14 @@ public class UIARMAnager : MonoBehaviour
 
     public void SaveDesign()
     {
+        if (ForwardToPrimary(manager => manager.SaveDesign()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        ResolveRuntimeLinks();
+
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager para guardar.");
@@ -96,13 +130,21 @@ public class UIARMAnager : MonoBehaviour
             designSaveManager = gameObject.AddComponent<DesignSaveManager>();
         }
 
+        placementManager.RefreshPlacedFurnitureList();
         designSaveManager.SaveDesign(placementManager.PlacedFurniture, roomColorManager);
         ClosePanels();
     }
 
     public void RotateSelectedFurniture()
     {
+        if (ForwardToPrimary(manager => manager.RotateSelectedFurniture()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        ResolveRuntimeLinks();
+
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -113,9 +155,21 @@ public class UIARMAnager : MonoBehaviour
         ClosePanels();
     }
 
+    public void RotateLastFurniture()
+    {
+        RotateSelectedFurniture();
+    }
+
     public void DeleteSelectedFurniture()
     {
+        if (ForwardToPrimary(manager => manager.DeleteSelectedFurniture()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        ResolveRuntimeLinks();
+
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -128,7 +182,14 @@ public class UIARMAnager : MonoBehaviour
 
     public void IncreaseSelectedFurnitureScale()
     {
+        if (ForwardToPrimary(manager => manager.IncreaseSelectedFurnitureScale()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        ResolveRuntimeLinks();
+
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -141,7 +202,14 @@ public class UIARMAnager : MonoBehaviour
 
     public void DecreaseSelectedFurnitureScale()
     {
+        if (ForwardToPrimary(manager => manager.DecreaseSelectedFurnitureScale()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        ResolveRuntimeLinks();
+
         if (placementManager == null)
         {
             Debug.LogWarning("UIARMAnager: falta FurniturePlacementManager.");
@@ -154,16 +222,31 @@ public class UIARMAnager : MonoBehaviour
 
     public void ClosePanels()
     {
+        if (ForwardToPrimary(manager => manager.ClosePanels()))
+        {
+            return;
+        }
+
         FurniturePlacementManager.BlockWorldInputBriefly();
+        EnsurePanelsReady();
         SetPanelActive(panelColors, false);
         SetPanelActive(panelFurniture, false);
+    }
+
+    public void OpenSavedDesigns()
+    {
+        if (ForwardToPrimary(manager => manager.OpenSavedDesigns()))
+        {
+            return;
+        }
+
+        SceneManager.LoadScene("SavedDesgins");
     }
 
     private void SetPanelActive(GameObject panel, bool isActive)
     {
         if (panel == null)
         {
-            Debug.LogWarning("UIARMAnager: falta asignar un panel.");
             return;
         }
 
@@ -198,6 +281,72 @@ public class UIARMAnager : MonoBehaviour
         }
     }
 
+    private bool IsPrimaryManager()
+    {
+        UIARMAnager best = FindPrimaryManager();
+        return best == null || best == this;
+    }
+
+    private UIARMAnager FindPrimaryManager()
+    {
+        UIARMAnager[] managers = FindObjectsOfType<UIARMAnager>();
+        UIARMAnager best = null;
+        int bestScore = int.MinValue;
+
+        foreach (UIARMAnager manager in managers)
+        {
+            if (manager == null || !manager.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int score = manager.GetSceneReferenceScore();
+            if (score > bestScore)
+            {
+                best = manager;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private bool ForwardToPrimary(System.Action<UIARMAnager> action)
+    {
+        UIARMAnager primary = FindPrimaryManager();
+        if (primary == null || primary == this)
+        {
+            return false;
+        }
+
+        action(primary);
+        return true;
+    }
+
+    private int GetSceneReferenceScore()
+    {
+        int score = 0;
+        if (furnitureCatalog != null) score += 4;
+        if (placementManager != null) score += 4;
+        if (panelColors != null) score += 1;
+        if (panelFurniture != null) score += 1;
+        if (gameObject.name == "UIManager") score += 1;
+        return score;
+    }
+
+    private void LoadPendingDesignForActiveScene()
+    {
+        string activeScene = SceneManager.GetActiveScene().name;
+        if (activeScene == "RoomDemo")
+        {
+            DesignSaveManager.TryLoadPendingRoomDemoDesign(furnitureCatalog, placementManager, roomColorManager);
+        }
+        else if (activeScene == "ARScene")
+        {
+            DesignSaveManager.TryLoadPendingARDesign(furnitureCatalog, placementManager, roomColorManager);
+        }
+    }
+
     private void ResolveBottomMenuLayout()
     {
         GameObject bottomMenu = GameObject.Find("BottomMenu");
@@ -221,6 +370,30 @@ public class UIARMAnager : MonoBehaviour
         }
     }
 
+    private void WireSceneButtons()
+    {
+        WireButton("BtnColors", OpenColors);
+        WireButton("BtnFurniture", OpenFurniture);
+        WireButton("BtnRotate", RotateSelectedFurniture);
+        WireButton("BtnSave", SaveDesign);
+        WireButton("BtnCargar", OpenSavedDesigns);
+        WireButton("BtnCerrar", ClosePanels);
+        WireButton("BtnDelete", ClearScene);
+        WireButton("BtnClear", ClearScene);
+        WireButton("BtnDeleteSelected", DeleteSelectedFurniture);
+        WireButton("BtnScaleUp", IncreaseSelectedFurnitureScale);
+        WireButton("BtnScaleDown", DecreaseSelectedFurnitureScale);
+    }
+
+    private void WireButton(string buttonName, UnityEngine.Events.UnityAction action)
+    {
+        foreach (Button button in FindButtonsByName(buttonName))
+        {
+            button.onClick = new Button.ButtonClickedEvent();
+            button.onClick.AddListener(action);
+        }
+    }
+
     private void EnsureRuntimePanels()
     {
         Canvas canvas = FindObjectOfType<Canvas>();
@@ -239,6 +412,28 @@ public class UIARMAnager : MonoBehaviour
         {
             panelColors = CreateRuntimePanel(canvas.transform, "RuntimeColorPanel", 130f);
         }
+    }
+
+    private void EnsurePanelsReady()
+    {
+        if (panelFurniture == null || panelColors == null)
+        {
+            ResolveBottomMenuLayout();
+            EnsureRuntimePanels();
+            BuildFurniturePanel();
+            BuildColorPanel();
+        }
+    }
+
+    private void EnsureActionButtons()
+    {
+        if (placementManager == null)
+        {
+            return;
+        }
+
+        EnsureRotateButton();
+        EnsureSelectedDeleteButton();
     }
 
     private void EnsureRotateButton()
@@ -265,14 +460,14 @@ public class UIARMAnager : MonoBehaviour
         rotateButton.onClick.AddListener(RotateSelectedFurniture);
     }
 
-    private void EnsureDeleteButton()
+    private void EnsureSelectedDeleteButton()
     {
         if (placementManager == null)
         {
             return;
         }
 
-        Button deleteButton = FindButtonByName("BtnDelete");
+        Button deleteButton = FindButtonByName("BtnDeleteSelected");
 
         if (deleteButton == null)
         {
@@ -281,11 +476,11 @@ public class UIARMAnager : MonoBehaviour
                 return;
             }
 
-            deleteButton = CreateTextButton(bottomButtonsContainer, "BORRAR");
-            deleteButton.name = "BtnDelete";
+            deleteButton = CreateTextButton(bottomButtonsContainer, "BORRAR SEL");
+            deleteButton.name = "BtnDeleteSelected";
         }
 
-        deleteButton.onClick.RemoveListener(DeleteSelectedFurniture);
+        deleteButton.onClick = new Button.ButtonClickedEvent();
         deleteButton.onClick.AddListener(DeleteSelectedFurniture);
     }
 
@@ -339,22 +534,36 @@ public class UIARMAnager : MonoBehaviour
 
     private Button FindButtonByName(string buttonName)
     {
+        List<Button> buttons = FindButtonsByName(buttonName);
+        return buttons.Count > 0 ? buttons[0] : null;
+    }
+
+    private List<Button> FindButtonsByName(string buttonName)
+    {
+        List<Button> buttons = new List<Button>();
+
         if (bottomButtonsContainer != null)
         {
             Transform buttonTransform = bottomButtonsContainer.Find(buttonName);
             if (buttonTransform != null)
             {
-                return buttonTransform.GetComponent<Button>();
+                Button button = buttonTransform.GetComponent<Button>();
+                if (button != null)
+                {
+                    buttons.Add(button);
+                }
             }
         }
 
-        GameObject buttonObject = GameObject.Find(buttonName);
-        if (buttonObject != null)
+        foreach (Button button in FindObjectsOfType<Button>(true))
         {
-            return buttonObject.GetComponent<Button>();
+            if (button != null && button.name == buttonName && !buttons.Contains(button))
+            {
+                buttons.Add(button);
+            }
         }
 
-        return null;
+        return buttons;
     }
 
     private void BuildFurniturePanel()

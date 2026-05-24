@@ -37,16 +37,31 @@ public class FurniturePlacementManager : MonoBehaviour
     private ARRaycastManager arRaycastManager;
 
     [SerializeField]
+    private ARPlaneManager arPlaneManager;
+
+    [SerializeField]
+    private ARAnchorManager arAnchorManager;
+
+    [SerializeField]
     private bool anchorARPlacedFurniture = true;
 
     [SerializeField]
-    private float arFallbackPlacementDistance = 1.6f;
+    private bool showPlacementReticle = true;
+
+    [SerializeField]
+    private float minimumHorizontalPlaneArea = 0.06f;
+
+    [SerializeField]
+    private float estimatedSurfaceUpDotThreshold = 0.72f;
 
     [SerializeField]
     private Camera placementCamera;
 
     [SerializeField]
     private LayerMask placedFurnitureLayerMask = ~0;
+
+    [SerializeField]
+    private RoomColorManager roomColorManager;
 
     [Header("RoomDemo Editing")]
     [SerializeField]
@@ -84,7 +99,16 @@ public class FurniturePlacementManager : MonoBehaviour
     private bool isDraggingARFurniture;
     private Plane selectedDragPlane;
     private GameObject selectionVisual;
-    public IReadOnlyList<GameObject> PlacedFurniture => placedFurniture;
+    private GameObject placementReticle;
+    private Material placementReticleMaterial;
+    public IReadOnlyList<GameObject> PlacedFurniture
+    {
+        get
+        {
+            RefreshPlacedFurnitureList();
+            return placedFurniture;
+        }
+    }
     public bool UsesARTapPlacement => enableARPlacement && arRaycastManager != null;
 
     public static void BlockWorldInputBriefly(float seconds = 0.25f)
@@ -103,6 +127,21 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             arRaycastManager = FindObjectOfType<ARRaycastManager>();
         }
+
+        if (arPlaneManager == null)
+        {
+            arPlaneManager = FindObjectOfType<ARPlaneManager>();
+        }
+
+        if (arAnchorManager == null)
+        {
+            arAnchorManager = FindObjectOfType<ARAnchorManager>();
+        }
+
+        if (roomColorManager == null)
+        {
+            roomColorManager = FindObjectOfType<RoomColorManager>();
+        }
     }
 
     private void Update()
@@ -112,6 +151,7 @@ public class FurniturePlacementManager : MonoBehaviour
         if (Time.unscaledTime < blockWorldInputUntil)
         {
             isDraggingSelectedFurniture = false;
+            UpdatePlacementReticle(false, default);
             return;
         }
 
@@ -135,13 +175,38 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             arRaycastManager = FindObjectOfType<ARRaycastManager>();
         }
+
+        if (arPlaneManager == null)
+        {
+            arPlaneManager = FindObjectOfType<ARPlaneManager>();
+        }
+
+        if (arAnchorManager == null)
+        {
+            arAnchorManager = FindObjectOfType<ARAnchorManager>();
+        }
+
+        if (roomColorManager == null)
+        {
+            roomColorManager = FindObjectOfType<RoomColorManager>();
+        }
     }
 
     private void UpdateARPlacementInput()
     {
         if (!enableARPlacement || arRaycastManager == null)
         {
+            UpdatePlacementReticle(false, default);
             return;
+        }
+
+        if (selectedFurniture != null)
+        {
+            UpdatePlacementReticleForScreenPoint(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
+        }
+        else
+        {
+            UpdatePlacementReticle(false, default);
         }
 
         if (Input.touchCount <= 0)
@@ -162,10 +227,16 @@ public class FurniturePlacementManager : MonoBehaviour
             if (TrySelectPlacedFurnitureAtScreenPoint(touch.position))
             {
                 isDraggingARFurniture = true;
+                selectedFurniture = null;
                 return;
             }
 
-            TryPlaceSelectedFurnitureAtScreenPoint(touch.position);
+            if (TryPlaceSelectedFurnitureAtScreenPoint(touch.position))
+            {
+                return;
+            }
+
+            TrySelectWallAtScreenPoint(touch.position);
             return;
         }
 
@@ -293,11 +364,6 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             ClearSelectedFurniture();
             Debug.Log("Selected furniture: " + selectedFurniture.itemName);
-
-            if (UsesARTapPlacement)
-            {
-                PlaceSelectedFurnitureInCameraView();
-            }
         }
     }
 
@@ -333,10 +399,7 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        Vector3 position = cam.transform.position + cam.transform.forward * arFallbackPlacementDistance + selectedFurniture.placementOffset;
-        Quaternion rotation = Quaternion.Euler(0f, cam.transform.eulerAngles.y, 0f);
-        GameObject placed = PlaceFurnitureAt(selectedFurniture, position, rotation);
-        TryAnchorPlacedFurniture(placed);
+        Debug.LogWarning("FurniturePlacementManager: apunta al piso detectado para colocar muebles en AR.");
     }
 
     public void PlaceFurniture(FurnitureItemData item)
@@ -371,16 +434,19 @@ public class FurniturePlacementManager : MonoBehaviour
             return false;
         }
 
-        if (!arRaycastManager.Raycast(screenPoint, arHits, TrackableType.PlaneWithinPolygon))
+        if (!TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane))
         {
             return false;
         }
 
-        Pose hitPose = arHits[0].pose;
+        Pose hitPose = horizontalHit.pose;
         Vector3 position = hitPose.position + selectedFurniture.placementOffset;
         Quaternion rotation = Quaternion.Euler(0f, hitPose.rotation.eulerAngles.y, 0f);
         GameObject placed = PlaceFurnitureAt(selectedFurniture, position, rotation);
-        TryAnchorPlacedFurniture(placed);
+        TryAnchorPlacedFurniture(placed, hitPlane, new Pose(position, rotation));
+        selectedFurniture = null;
+        SetSelectedFurniture(placed);
+        UpdatePlacementReticle(false, default);
         return true;
     }
 
@@ -465,6 +531,8 @@ public class FurniturePlacementManager : MonoBehaviour
 
     public void DeleteSelectedFurniture()
     {
+        RefreshPlacedFurnitureList();
+
         GameObject target = selectedPlacedFurniture != null ? selectedPlacedFurniture : lastPlacedFurniture;
         if (target == null)
         {
@@ -483,9 +551,8 @@ public class FurniturePlacementManager : MonoBehaviour
             selectedPlacedFurniture = null;
         }
 
-        GameObject toDelete = target;
         selectedPlacedFurniture = null;
-        Destroy(toDelete);
+        DestroyPlacedFurniture(target);
         Debug.Log("Deleted selected furniture.");
     }
 
@@ -534,11 +601,13 @@ public class FurniturePlacementManager : MonoBehaviour
     public void ClearPlacedFurniture()
     {
         DestroySelectionVisual();
+        RefreshPlacedFurnitureList();
+
         for (int i = placedFurniture.Count - 1; i >= 0; i--)
         {
             if (placedFurniture[i] != null)
             {
-                Destroy(placedFurniture[i]);
+                DestroyPlacedFurniture(placedFurniture[i]);
             }
         }
 
@@ -547,6 +616,41 @@ public class FurniturePlacementManager : MonoBehaviour
         selectedPlacedFurniture = null;
 
         Debug.Log("Placed furniture cleared.");
+    }
+
+    public void RefreshPlacedFurnitureList()
+    {
+        for (int i = placedFurniture.Count - 1; i >= 0; i--)
+        {
+            if (placedFurniture[i] == null)
+            {
+                placedFurniture.RemoveAt(i);
+            }
+        }
+
+        GameObject[] sceneObjects = FindObjectsOfType<GameObject>();
+        foreach (GameObject sceneObject in sceneObjects)
+        {
+            if (sceneObject == null ||
+                !sceneObject.activeInHierarchy ||
+                !sceneObject.name.StartsWith("Placed_") ||
+                placedFurniture.Contains(sceneObject))
+            {
+                continue;
+            }
+
+            placedFurniture.Add(sceneObject);
+        }
+
+        if (selectedPlacedFurniture == null || !placedFurniture.Contains(selectedPlacedFurniture))
+        {
+            selectedPlacedFurniture = null;
+        }
+
+        if (lastPlacedFurniture == null || !placedFurniture.Contains(lastPlacedFurniture))
+        {
+            lastPlacedFurniture = placedFurniture.Count > 0 ? placedFurniture[placedFurniture.Count - 1] : null;
+        }
     }
 
     private Vector3 GetNextPlacementPosition()
@@ -748,39 +852,26 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         if (arRaycastManager != null &&
-            arRaycastManager.Raycast(screenPoint, arHits, TrackableType.PlaneWithinPolygon))
+            TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane))
         {
-            MoveSelectedARFurniture(arHits[0].pose.position);
-            return true;
-        }
-
-        Camera cam = GetPlacementCamera();
-        if (cam == null)
-        {
-            return false;
-        }
-
-        Ray ray = cam.ScreenPointToRay(screenPoint);
-        Plane dragPlane = new Plane(Vector3.up, selectedPlacedFurniture.transform.position);
-        if (dragPlane.Raycast(ray, out float enter))
-        {
-            MoveSelectedARFurniture(ray.GetPoint(enter));
+            MoveSelectedARFurniture(horizontalHit.pose.position, hitPlane);
             return true;
         }
 
         return false;
     }
 
-    private void MoveSelectedARFurniture(Vector3 position)
+    private void MoveSelectedARFurniture(Vector3 position, ARPlane hitPlane)
     {
         if (selectedPlacedFurniture == null)
         {
             return;
         }
 
+        Quaternion rotation = selectedPlacedFurniture.transform.rotation;
         RemoveAnchor(selectedPlacedFurniture);
         selectedPlacedFurniture.transform.position = position;
-        TryAnchorPlacedFurniture(selectedPlacedFurniture);
+        TryAnchorPlacedFurniture(selectedPlacedFurniture, hitPlane, new Pose(position, rotation));
     }
 
     private bool IsPointerOverBlockingUI(Vector2 screenPoint, int pointerId)
@@ -929,11 +1020,210 @@ public class FurniturePlacementManager : MonoBehaviour
         return height <= Screen.height * 0.7f && width <= Screen.width * 1.15f;
     }
 
-    private void TryAnchorPlacedFurniture(GameObject placed)
+    private bool TryGetBestHorizontalSurfaceHit(Vector2 screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane)
+    {
+        TrackableType preciseMask =
+            TrackableType.PlaneWithinPolygon |
+            TrackableType.PlaneWithinBounds |
+            TrackableType.PlaneWithinInfinity;
+
+        if (arRaycastManager.Raycast(screenPoint, arHits, preciseMask) &&
+            TryGetHorizontalPlaneHit(out horizontalHit, out hitPlane, true))
+        {
+            return true;
+        }
+
+        TrackableType estimatedMask = preciseMask | TrackableType.PlaneEstimated;
+        if (arRaycastManager.Raycast(screenPoint, arHits, estimatedMask) &&
+            TryGetHorizontalPlaneHit(out horizontalHit, out hitPlane, false))
+        {
+            return true;
+        }
+
+        horizontalHit = default;
+        hitPlane = null;
+        return false;
+    }
+
+    private bool TryGetHorizontalPlaneHit(out ARRaycastHit horizontalHit, out ARPlane hitPlane, bool requireKnownPlane)
+    {
+        for (int i = 0; i < arHits.Count; i++)
+        {
+            ARPlane plane = arPlaneManager != null ? arPlaneManager.GetPlane(arHits[i].trackableId) : null;
+            if (plane != null)
+            {
+                if (!IsUsableHorizontalPlane(plane))
+                {
+                    continue;
+                }
+
+                horizontalHit = arHits[i];
+                hitPlane = plane;
+                return true;
+            }
+
+            if (requireKnownPlane || !IsEstimatedHorizontalHit(arHits[i]))
+            {
+                continue;
+            }
+
+            horizontalHit = arHits[i];
+            hitPlane = null;
+            return true;
+        }
+
+        horizontalHit = default;
+        hitPlane = null;
+        return false;
+    }
+
+    private static bool IsHorizontalPlane(ARPlane plane)
+    {
+        return plane.alignment == PlaneAlignment.HorizontalUp;
+    }
+
+    private bool IsUsableHorizontalPlane(ARPlane plane)
+    {
+        if (plane == null || !IsHorizontalPlane(plane))
+        {
+            return false;
+        }
+
+        Vector2 size = plane.size;
+        return size.x * size.y >= minimumHorizontalPlaneArea;
+    }
+
+    private bool IsEstimatedHorizontalHit(ARRaycastHit hit)
+    {
+        float upDot = Vector3.Dot(hit.pose.up, Vector3.up);
+        return upDot >= estimatedSurfaceUpDotThreshold;
+    }
+
+    private void UpdatePlacementReticleForScreenPoint(Vector2 screenPoint)
+    {
+        if (!showPlacementReticle || arRaycastManager == null)
+        {
+            UpdatePlacementReticle(false, default);
+            return;
+        }
+
+        if (TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit hit, out _))
+        {
+            UpdatePlacementReticle(true, hit.pose);
+            return;
+        }
+
+        UpdatePlacementReticle(false, default);
+    }
+
+    private void UpdatePlacementReticle(bool visible, Pose pose)
+    {
+        if (!showPlacementReticle)
+        {
+            if (placementReticle != null)
+            {
+                placementReticle.SetActive(false);
+            }
+            return;
+        }
+
+        EnsurePlacementReticle();
+        if (placementReticle == null)
+        {
+            return;
+        }
+
+        placementReticle.SetActive(visible);
+        if (!visible)
+        {
+            return;
+        }
+
+        placementReticle.transform.SetPositionAndRotation(
+            pose.position + Vector3.up * 0.006f,
+            Quaternion.Euler(0f, pose.rotation.eulerAngles.y, 0f));
+    }
+
+    private void EnsurePlacementReticle()
+    {
+        if (placementReticle != null)
+        {
+            return;
+        }
+
+        placementReticle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        placementReticle.name = "ARPlacementReticle";
+        placementReticle.transform.localScale = new Vector3(0.28f, 0.008f, 0.28f);
+
+        Collider reticleCollider = placementReticle.GetComponent<Collider>();
+        if (reticleCollider != null)
+        {
+            Destroy(reticleCollider);
+        }
+
+        Renderer renderer = placementReticle.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+            {
+                shader = Shader.Find("Unlit/Color");
+            }
+
+            placementReticleMaterial = new Material(shader);
+            placementReticleMaterial.color = new Color(0.18f, 0.9f, 0.55f, 0.55f);
+            if (placementReticleMaterial.HasProperty("_BaseColor"))
+            {
+                placementReticleMaterial.SetColor("_BaseColor", placementReticleMaterial.color);
+            }
+            placementReticleMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            renderer.sharedMaterial = placementReticleMaterial;
+        }
+
+        placementReticle.SetActive(false);
+    }
+
+    private bool TrySelectWallAtScreenPoint(Vector2 screenPoint)
+    {
+        if (roomColorManager == null)
+        {
+            return false;
+        }
+
+        if (roomColorManager.TrySelectWallAtScreenPoint(screenPoint))
+        {
+            return true;
+        }
+
+        roomColorManager.ClearSelectedWall();
+        return false;
+    }
+
+    private void TryAnchorPlacedFurniture(GameObject placed, ARPlane plane = null, Pose? pose = null)
     {
         if (!anchorARPlacedFurniture || placed == null || !UsesARTapPlacement)
         {
             return;
+        }
+
+        RemoveAnchor(placed);
+
+        Pose anchorPose = pose ?? new Pose(placed.transform.position, placed.transform.rotation);
+        if (arAnchorManager != null && plane != null)
+        {
+            try
+            {
+                ARAnchor attachedAnchor = arAnchorManager.AttachAnchor(plane, anchorPose);
+                if (attachedAnchor != null)
+                {
+                    placed.transform.SetParent(attachedAnchor.transform, true);
+                    return;
+                }
+            }
+            catch (System.InvalidOperationException exception)
+            {
+                Debug.LogWarning("FurniturePlacementManager: no se pudo adjuntar anchor al plano AR. Se usara anchor directo. " + exception.Message);
+            }
         }
 
         if (placed.GetComponent<ARAnchor>() == null)
@@ -944,11 +1234,49 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private static void RemoveAnchor(GameObject target)
     {
+        if (target == null)
+        {
+            return;
+        }
+
         ARAnchor anchor = target.GetComponent<ARAnchor>();
         if (anchor != null)
         {
             Destroy(anchor);
+            return;
         }
+
+        Transform parent = target.transform.parent;
+        if (parent == null)
+        {
+            return;
+        }
+
+        ARAnchor parentAnchor = parent.GetComponent<ARAnchor>();
+        if (parentAnchor == null)
+        {
+            return;
+        }
+
+        target.transform.SetParent(null, true);
+        Destroy(parent.gameObject);
+    }
+
+    private static void DestroyPlacedFurniture(GameObject target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        Transform parent = target.transform.parent;
+        if (parent != null && parent.GetComponent<ARAnchor>() != null)
+        {
+            Destroy(parent.gameObject);
+            return;
+        }
+
+        Destroy(target);
     }
 
     private static void EnsureSelectableCollider(GameObject instance)
