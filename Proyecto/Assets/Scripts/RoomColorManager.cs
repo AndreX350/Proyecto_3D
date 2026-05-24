@@ -102,11 +102,13 @@ public class RoomColorManager : MonoBehaviour
 
         if (arRaycastManager == null || arPlaneManager == null)
         {
+            ARDiagnostics.Report("No se puede seleccionar pared: falta ARRaycastManager o ARPlaneManager.");
             return false;
         }
 
         if (!arRaycastManager.Raycast(screenPoint, arHits, TrackableType.PlaneWithinPolygon))
         {
+            ARDiagnostics.Report("Raycast AR a pared sin hits.");
             return false;
         }
 
@@ -131,9 +133,11 @@ public class RoomColorManager : MonoBehaviour
             }
 
             Debug.Log("Pared AR seleccionada para color.");
+            ARDiagnostics.Report("Pared AR vertical detectada y seleccionada.");
             return true;
         }
 
+        ARDiagnostics.Report("Hubo hits AR pero ninguno era pared vertical.");
         return false;
     }
 

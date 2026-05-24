@@ -110,6 +110,11 @@ public class FurniturePlacementManager : MonoBehaviour
         }
     }
     public bool UsesARTapPlacement => enableARPlacement && arRaycastManager != null;
+    public bool IsAREnabled => enableARPlacement;
+    public bool HasARRaycastManager => arRaycastManager != null;
+    public bool HasARPlaneManager => arPlaneManager != null;
+    public bool HasARAnchorManager => arAnchorManager != null;
+    public bool HasSelectedFurnitureForAR => selectedFurniture != null;
 
     public static void BlockWorldInputBriefly(float seconds = 0.25f)
     {
@@ -196,6 +201,7 @@ public class FurniturePlacementManager : MonoBehaviour
     {
         if (!enableARPlacement || arRaycastManager == null)
         {
+            ARDiagnostics.Report("AR placement apagado o falta ARRaycastManager.");
             UpdatePlacementReticle(false, default);
             return;
         }
@@ -218,6 +224,7 @@ public class FurniturePlacementManager : MonoBehaviour
         Touch touch = Input.GetTouch(0);
         if (IsPointerOverBlockingUI(touch.position, touch.fingerId))
         {
+            ARDiagnostics.Report("Tap bloqueado por UI.");
             isDraggingARFurniture = false;
             return;
         }
@@ -228,15 +235,24 @@ public class FurniturePlacementManager : MonoBehaviour
             {
                 isDraggingARFurniture = true;
                 selectedFurniture = null;
+                ARDiagnostics.Report("Mueble AR seleccionado para mover.");
                 return;
             }
 
             if (TryPlaceSelectedFurnitureAtScreenPoint(touch.position))
             {
+                ARDiagnostics.Report("Mueble colocado en plano horizontal.");
                 return;
             }
 
-            TrySelectWallAtScreenPoint(touch.position);
+            if (TrySelectWallAtScreenPoint(touch.position))
+            {
+                ARDiagnostics.Report("Pared AR vertical seleccionada.");
+            }
+            else
+            {
+                ARDiagnostics.Report("Tap sin hit util: ni piso horizontal ni pared vertical.");
+            }
             return;
         }
 
@@ -426,16 +442,19 @@ public class FurniturePlacementManager : MonoBehaviour
     {
         if (!enableARPlacement || arRaycastManager == null)
         {
+            ARDiagnostics.Report("No se puede colocar: AR placement desactivado o falta ARRaycastManager.");
             return false;
         }
 
         if (selectedFurniture == null)
         {
+            ARDiagnostics.Report("No se puede colocar: no hay mueble seleccionado.");
             return false;
         }
 
         if (!TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane))
         {
+            ARDiagnostics.Report("No se detecto piso horizontal util en el tap.");
             return false;
         }
 
@@ -1054,6 +1073,7 @@ public class FurniturePlacementManager : MonoBehaviour
             {
                 if (!IsUsableHorizontalPlane(plane))
                 {
+                    ARDiagnostics.Report("Plano horizontal detectado pero muy pequeno para colocar.");
                     continue;
                 }
 
@@ -1187,6 +1207,7 @@ public class FurniturePlacementManager : MonoBehaviour
     {
         if (roomColorManager == null)
         {
+            ARDiagnostics.Report("No se puede seleccionar pared: falta RoomColorManager.");
             return false;
         }
 

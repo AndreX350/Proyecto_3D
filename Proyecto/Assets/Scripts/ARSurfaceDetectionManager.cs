@@ -72,6 +72,7 @@ public class ARSurfaceDetectionManager : MonoBehaviour
         }
 
         planeManager.requestedDetectionMode = mode;
+        ARDiagnostics.Report("PlaneDetectionMode activo: " + mode);
 
         if (hidePlaneVisuals && planeManager.planePrefab != null)
         {

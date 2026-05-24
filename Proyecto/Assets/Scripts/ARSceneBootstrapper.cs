@@ -89,9 +89,26 @@ public class ARSceneBootstrapper : MonoBehaviour
         SetOriginCamera(origin, arCamera);
         SetOriginCameraOffset(origin, cameraOffset);
         AddComponentIfMissing(originObject, typeof(ARSurfaceDetectionManager));
+        EnsureARDebugOverlay();
         DisableDuplicateCameras(arCamera);
         Debug.Log("ARSceneBootstrapper: AR Foundation rig listo.");
         return true;
+    }
+
+    private static void EnsureARDebugOverlay()
+    {
+        if (!Debug.isDebugBuild)
+        {
+            return;
+        }
+
+        if (FindObjectOfType<ARDebugOverlay>() != null)
+        {
+            return;
+        }
+
+        GameObject overlayObject = new GameObject("ARDebugOverlay");
+        overlayObject.AddComponent<ARDebugOverlay>();
     }
 
     private void SetDemoRoomVisible(bool visible)
