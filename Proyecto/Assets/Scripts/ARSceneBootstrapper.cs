@@ -72,7 +72,6 @@ public class ARSceneBootstrapper : MonoBehaviour
         {
             Component planeManager = AddComponentIfMissing(originObject, arPlaneManagerType);
             SetPlaneDetectionMode(planeManager);
-            ClearPlanePrefab(planeManager);
             EnableComponent(planeManager);
         }
 
@@ -287,31 +286,22 @@ public class ARSceneBootstrapper : MonoBehaviour
             return;
         }
 
-        Type planeDetectionModeType = GetTypeFromAssemblies("UnityEngine.XR.ARSubsystems.PlaneDetectionMode");
-        if (planeDetectionModeType == null)
+        try
         {
-            return;
+            PropertyInfo requestedDetectionModeProperty = planeManager.GetType().GetProperty("requestedDetectionMode");
+            if (requestedDetectionModeProperty != null && requestedDetectionModeProperty.CanWrite)
+            {
+                Type planeDetectionModeType = requestedDetectionModeProperty.PropertyType;
+                int horizontal = Convert.ToInt32(Enum.Parse(planeDetectionModeType, "Horizontal"));
+                int vertical = Convert.ToInt32(Enum.Parse(planeDetectionModeType, "Vertical"));
+                object combined = Enum.ToObject(planeDetectionModeType, horizontal | vertical);
+                requestedDetectionModeProperty.SetValue(planeManager, combined);
+            }
         }
-
-        object horizontalAndVertical = Enum.Parse(planeDetectionModeType, "Horizontal, Vertical");
-        PropertyInfo requestedDetectionModeProperty = planeManager.GetType().GetProperty("requestedDetectionMode");
-        if (requestedDetectionModeProperty != null && requestedDetectionModeProperty.CanWrite)
+        catch
         {
-            requestedDetectionModeProperty.SetValue(planeManager, horizontalAndVertical);
-        }
-    }
-
-    private static void ClearPlanePrefab(Component planeManager)
-    {
-        if (planeManager == null)
-        {
-            return;
-        }
-
-        PropertyInfo planePrefabProperty = planeManager.GetType().GetProperty("planePrefab");
-        if (planePrefabProperty != null && planePrefabProperty.CanWrite)
-        {
-            planePrefabProperty.SetValue(planeManager, null);
+            EnableComponent(planeManager);
         }
     }
+
 }

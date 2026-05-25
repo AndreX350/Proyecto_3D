@@ -6360,15 +6360,15 @@ MonoBehaviour:
   anchorARPlacedFurniture: 1
   showPlacementReticle: 1
   minimumHorizontalPlaneArea: 0.06
-  estimatedSurfaceUpDotThreshold: 0.72
+  estimatedSurfaceUpDotThreshold: 0.65
   useGridSnapForAR: 1
-  arGridSize: 0.1
-  maxARPlacementDistance: 5
+  arGridSize: 0.05
+  maxARPlacementDistance: 10
   preventPlacementOnCollision: 1
   placementCamera: {fileID: 1484649141}
   placedFurnitureLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 64
   roomColorManager: {fileID: 0}
   enableRoomEditing: 1
   floorLayerMask:

@@ -14,7 +14,6 @@ public class ARSurfaceDetectionManager : MonoBehaviour
     private bool detectVerticalPlanes = true;
 
     private ARPlaneManager planeManager;
-
     private void Awake()
     {
         ResolvePlaneManager();
@@ -70,14 +69,13 @@ public class ARSurfaceDetectionManager : MonoBehaviour
         {
             mode |= PlaneDetectionMode.Vertical;
         }
+        else if (!detectHorizontalPlanes)
+        {
+            mode |= PlaneDetectionMode.Vertical;
+        }
 
         planeManager.requestedDetectionMode = mode;
         ARDiagnostics.Report("PlaneDetectionMode activo: " + mode);
-
-        if (hidePlaneVisuals && planeManager.planePrefab != null)
-        {
-            planeManager.planePrefab = null;
-        }
     }
 
     private void OnPlanesChanged(ARPlanesChangedEventArgs args)

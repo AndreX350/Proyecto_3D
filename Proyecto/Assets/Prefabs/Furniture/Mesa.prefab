@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 6325140608306471615}
   - component: {fileID: 8447073037025244817}
   - component: {fileID: 6903570361856130422}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Pata4
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -119,7 +119,7 @@ GameObject:
   - component: {fileID: 9199554138753982763}
   - component: {fileID: 4685323834972249523}
   - component: {fileID: 2140095700113224087}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Pata1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -226,7 +226,7 @@ GameObject:
   - component: {fileID: 7916350398646940969}
   - component: {fileID: 4071605243544067570}
   - component: {fileID: 463681487935772674}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Pataa2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -333,7 +333,7 @@ GameObject:
   - component: {fileID: 2702216617417248095}
   - component: {fileID: 6374958400909535905}
   - component: {fileID: 7251724159754604429}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Mesa
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -442,7 +442,7 @@ GameObject:
   - component: {fileID: 2270490714382426558}
   - component: {fileID: 595406673208230990}
   - component: {fileID: 8740842497314762998}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Pata3
   m_TagString: Untagged
   m_Icon: {fileID: 0}

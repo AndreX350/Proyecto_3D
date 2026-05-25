@@ -32,6 +32,7 @@ public class RoomColorManager : MonoBehaviour
     private ARPlaneManager arPlaneManager;
     private ARPlane selectedARWall;
     private float selectedWallBoostUntil;
+    private float verticalDetectionReadyTime;
     private Color pendingWallColor = Color.white;
     private bool hasPendingWallColor;
 
@@ -46,6 +47,7 @@ public class RoomColorManager : MonoBehaviour
     private void Awake()
     {
         ResolveARManagers();
+        verticalDetectionReadyTime = Time.unscaledTime + 1f;
 
         if (wallRenderers.Count == 0)
         {
@@ -274,8 +276,12 @@ public class RoomColorManager : MonoBehaviour
 
     private void AddDetectedARWalls()
     {
-        ARPlane[] planes = FindObjectsOfType<ARPlane>();
-        foreach (ARPlane plane in planes)
+        if (arPlaneManager == null || Time.unscaledTime < verticalDetectionReadyTime)
+        {
+            return;
+        }
+
+        foreach (ARPlane plane in arPlaneManager.trackables)
         {
             if (plane == null || plane.alignment != PlaneAlignment.Vertical)
             {

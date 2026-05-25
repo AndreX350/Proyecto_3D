@@ -49,19 +49,19 @@ public class FurniturePlacementManager : MonoBehaviour
     private bool showPlacementReticle = true;
 
     [SerializeField]
-    private float minimumHorizontalPlaneArea = 0.06f;
+    private float minimumHorizontalPlaneArea = 0.04f;
 
     [SerializeField]
-    private float estimatedSurfaceUpDotThreshold = 0.72f;
+    private float estimatedSurfaceUpDotThreshold = 0.65f;
 
     [SerializeField]
     private bool useGridSnapForAR = true;
 
     [SerializeField]
-    private float arGridSize = 0.1f;
+    private float arGridSize = 0.05f;
 
     [SerializeField]
-    private float maxARPlacementDistance = 5f;
+    private float maxARPlacementDistance = 10f;
 
     [SerializeField]
     private bool preventPlacementOnCollision = true;
@@ -70,7 +70,7 @@ public class FurniturePlacementManager : MonoBehaviour
     private Camera placementCamera;
 
     [SerializeField]
-    private LayerMask placedFurnitureLayerMask = ~0;
+    private LayerMask placedFurnitureLayerMask = 1 << 6;
 
     [SerializeField]
     private RoomColorManager roomColorManager;
@@ -113,6 +113,9 @@ public class FurniturePlacementManager : MonoBehaviour
     private GameObject selectionVisual;
     private GameObject placementReticle;
     private Material placementReticleMaterial;
+    private Vector2 pendingWallRetryPoint;
+    private float pendingWallRetryTime;
+    private int pendingWallRetryCount;
     public IReadOnlyList<GameObject> PlacedFurniture
     {
         get
@@ -153,6 +156,13 @@ public class FurniturePlacementManager : MonoBehaviour
         if (arAnchorManager == null)
         {
             arAnchorManager = FindObjectOfType<ARAnchorManager>();
+        }
+
+        ARSession arSession = FindObjectOfType<ARSession>();
+        if (arSession != null)
+        {
+            arSession.enabled = true;
+            arSession.requestedTrackingMode = TrackingMode.PositionAndRotation;
         }
 
         if (roomColorManager == null)
@@ -218,6 +228,8 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
+        ProcessPendingWallRetry();
+
         if (selectedFurniture != null)
         {
             UpdatePlacementReticleForScreenPoint(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
@@ -264,6 +276,9 @@ public class FurniturePlacementManager : MonoBehaviour
             else
             {
                 ARDiagnostics.Report("Tap sin hit util: ni piso horizontal ni pared vertical.");
+                pendingWallRetryPoint = touch.position;
+                pendingWallRetryTime = Time.unscaledTime + 0.5f;
+                pendingWallRetryCount = 1;
             }
             return;
         }
@@ -471,7 +486,10 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         Pose hitPose = horizontalHit.pose;
-        Vector3 position = hitPose.position + selectedFurniture.placementOffset;
+        Vector3 position = new Vector3(
+            hitPose.position.x + selectedFurniture.placementOffset.x,
+            hitPose.position.y,
+            hitPose.position.z + selectedFurniture.placementOffset.z);
         if (!IsWithinPlacementDistance(position))
         {
             ARDiagnostics.Report("No se puede colocar: demasiado lejos de la camara.");
@@ -685,20 +703,6 @@ public class FurniturePlacementManager : MonoBehaviour
             {
                 placedFurniture.RemoveAt(i);
             }
-        }
-
-        GameObject[] sceneObjects = FindObjectsOfType<GameObject>();
-        foreach (GameObject sceneObject in sceneObjects)
-        {
-            if (sceneObject == null ||
-                !sceneObject.activeInHierarchy ||
-                !sceneObject.name.StartsWith("Placed_") ||
-                placedFurniture.Contains(sceneObject))
-            {
-                continue;
-            }
-
-            placedFurniture.Add(sceneObject);
         }
 
         if (selectedPlacedFurniture == null || !placedFurniture.Contains(selectedPlacedFurniture))
@@ -1279,6 +1283,36 @@ public class FurniturePlacementManager : MonoBehaviour
         return false;
     }
 
+    private void ProcessPendingWallRetry()
+    {
+        if (pendingWallRetryCount <= 0)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime < pendingWallRetryTime)
+        {
+            return;
+        }
+
+        bool selected = TrySelectWallAtScreenPoint(pendingWallRetryPoint);
+        if (selected)
+        {
+            ARDiagnostics.Report("Pared AR detectada en reintento.");
+            pendingWallRetryCount = 0;
+            return;
+        }
+
+        pendingWallRetryCount++;
+        if (pendingWallRetryCount > 2)
+        {
+            pendingWallRetryCount = 0;
+            return;
+        }
+
+        pendingWallRetryTime = Time.unscaledTime + 0.5f;
+    }
+
     private void TryAnchorPlacedFurniture(GameObject placed, ARPlane plane = null, Pose? pose = null)
     {
         if (!anchorARPlacedFurniture || placed == null || !UsesARTapPlacement)
@@ -1320,7 +1354,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         ARAnchor anchor = target.GetComponent<ARAnchor>();
-        if (anchor != null)
+        if (anchor != null && anchor.gameObject != null)
         {
             Destroy(anchor);
             return;
@@ -1382,10 +1416,12 @@ public class FurniturePlacementManager : MonoBehaviour
         collider.center = instance.transform.InverseTransformPoint(bounds.center);
 
         Vector3 scale = instance.transform.lossyScale;
-        collider.size = new Vector3(
+        Vector3 colliderSize = new Vector3(
             SafeDivide(bounds.size.x, scale.x),
             SafeDivide(bounds.size.y, scale.y),
             SafeDivide(bounds.size.z, scale.z));
+        collider.size = colliderSize;
+        collider.center = new Vector3(collider.center.x, colliderSize.y * 0.5f, collider.center.z);
     }
 
     private static float SafeDivide(float value, float divisor)
@@ -1445,6 +1481,11 @@ public class FurniturePlacementManager : MonoBehaviour
                 GameObject placedRoot = GetPlacedFurnitureRoot(overlap.transform);
                 if (placedRoot != null && placedRoot != target)
                 {
+                    if (overlap.GetComponentInParent<ARPlane>() != null)
+                    {
+                        continue;
+                    }
+
                     return true;
                 }
             }
