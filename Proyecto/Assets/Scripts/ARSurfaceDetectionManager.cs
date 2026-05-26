@@ -14,6 +14,9 @@ public class ARSurfaceDetectionManager : MonoBehaviour
     private bool detectVerticalPlanes = true;
 
     private ARPlaneManager planeManager;
+    private PlaneDetectionMode lastRequestedDetectionMode = PlaneDetectionMode.None;
+    private bool hasConfiguredDetectionMode;
+
     private void Awake()
     {
         ResolvePlaneManager();
@@ -69,12 +72,17 @@ public class ARSurfaceDetectionManager : MonoBehaviour
         {
             mode |= PlaneDetectionMode.Vertical;
         }
-        else if (!detectHorizontalPlanes)
+
+        if (hasConfiguredDetectionMode &&
+            lastRequestedDetectionMode == mode &&
+            planeManager.requestedDetectionMode == mode)
         {
-            mode |= PlaneDetectionMode.Vertical;
+            return;
         }
 
         planeManager.requestedDetectionMode = mode;
+        lastRequestedDetectionMode = mode;
+        hasConfiguredDetectionMode = true;
         ARDiagnostics.Report("PlaneDetectionMode activo: " + mode);
     }
 
@@ -131,6 +139,11 @@ public class ARSurfaceDetectionManager : MonoBehaviour
         LineRenderer[] lineRenderers = plane.GetComponentsInChildren<LineRenderer>(true);
         for (int i = 0; i < lineRenderers.Length; i++)
         {
+            if (IsAppOverlay(lineRenderers[i].gameObject))
+            {
+                continue;
+            }
+
             lineRenderers[i].enabled = false;
         }
 

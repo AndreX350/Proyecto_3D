@@ -14,8 +14,12 @@ public class ARRuntimeUXManager : MonoBehaviour
     [SerializeField]
     private float unsupportedDelaySeconds = 2.5f;
 
+    [SerializeField]
+    private float installGraceSeconds = 18f;
+
     private ARPlaneManager planeManager;
     private float sceneStartTime;
+    private float installStateStartTime = -1f;
     private GUIStyle textStyle;
     private GUIStyle titleStyle;
     private string compatMessage;
@@ -141,9 +145,20 @@ public class ARRuntimeUXManager : MonoBehaviour
 
         if (state == ARSessionState.NeedsInstall || state == ARSessionState.Installing)
         {
-            ShowFallback("Se requiere Google Play Services for AR y no pudo inicializarse.");
+            if (installStateStartTime < 0f)
+            {
+                installStateStartTime = Time.unscaledTime;
+            }
+
+            if (Time.unscaledTime - installStateStartTime >= installGraceSeconds)
+            {
+                ShowFallback("Se requiere Google Play Services for AR y no pudo inicializarse.");
+            }
+
             return;
         }
+
+        installStateStartTime = -1f;
     }
 
     private void ShowFallback(string message)

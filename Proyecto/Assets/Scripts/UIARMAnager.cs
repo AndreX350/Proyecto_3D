@@ -58,6 +58,16 @@ public class UIARMAnager : MonoBehaviour
         LoadPendingDesignForActiveScene();
     }
 
+    private void Update()
+    {
+        if (!isPrimaryManager || panelColors == null || !panelColors.activeInHierarchy)
+        {
+            return;
+        }
+
+        UpdateWallStatusText();
+    }
+
     public void OpenColors()
     {
         if (ForwardToPrimary(manager => manager.OpenColors()))
@@ -813,8 +823,6 @@ public class UIARMAnager : MonoBehaviour
             return;
         }
 
-        string selectedLabel = roomColorManager.GetSelectedWallShortName();
-        string pendingLabel = roomColorManager.HasPendingWallColor() ? "Color pendiente" : "Sin color pendiente";
-        wallStatusText.text = selectedLabel + "\n" + pendingLabel;
+        wallStatusText.text = roomColorManager.GetWallStatusText();
     }
 }

@@ -8,6 +8,7 @@ using UnityEngine.XR.ARSubsystems;
 public class FurniturePlacementManager : MonoBehaviour
 {
     private static float blockWorldInputUntil;
+    private const string PlacedFurnitureLayerName = "PlacedFurniture";
 
     [Header("Placement")]
     [SerializeField]
@@ -59,6 +60,9 @@ public class FurniturePlacementManager : MonoBehaviour
 
     [SerializeField]
     private float arGridSize = 0.05f;
+
+    [SerializeField]
+    private bool snapARFurnitureWhileDragging = false;
 
     [SerializeField]
     private float maxARPlacementDistance = 10f;
@@ -116,6 +120,9 @@ public class FurniturePlacementManager : MonoBehaviour
     private Vector2 pendingWallRetryPoint;
     private float pendingWallRetryTime;
     private int pendingWallRetryCount;
+    private ARPlane activeARDragPlane;
+    private Pose activeARDragPose;
+    private bool hasActiveARDragPose;
     public IReadOnlyList<GameObject> PlacedFurniture
     {
         get
@@ -138,6 +145,8 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private void Awake()
     {
+        EnsurePlacedFurnitureLayerMask();
+
         if (placementCamera == null)
         {
             placementCamera = Camera.main;
@@ -178,6 +187,7 @@ public class FurniturePlacementManager : MonoBehaviour
         if (Time.unscaledTime < blockWorldInputUntil)
         {
             isDraggingSelectedFurniture = false;
+            FinishARFurnitureDrag();
             UpdatePlacementReticle(false, default);
             return;
         }
@@ -241,7 +251,7 @@ public class FurniturePlacementManager : MonoBehaviour
 
         if (Input.touchCount <= 0)
         {
-            isDraggingARFurniture = false;
+            FinishARFurnitureDrag();
             return;
         }
 
@@ -249,7 +259,7 @@ public class FurniturePlacementManager : MonoBehaviour
         if (blockPlacementWhenPointerOverUI && IsPointerOverBlockingUI(touch.position, touch.fingerId))
         {
             ARDiagnostics.Report("Tap bloqueado por UI.");
-            isDraggingARFurniture = false;
+            FinishARFurnitureDrag();
             return;
         }
 
@@ -257,7 +267,7 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             if (TrySelectPlacedFurnitureAtScreenPoint(touch.position))
             {
-                isDraggingARFurniture = true;
+                BeginARFurnitureDrag();
                 selectedFurniture = null;
                 ARDiagnostics.Report("Mueble AR seleccionado para mover.");
                 return;
@@ -295,7 +305,7 @@ public class FurniturePlacementManager : MonoBehaviour
 
         if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
         {
-            isDraggingARFurniture = false;
+            FinishARFurnitureDrag();
             return;
         }
     }
@@ -575,6 +585,7 @@ public class FurniturePlacementManager : MonoBehaviour
         GameObject instance = Instantiate(item.prefab, position, rotation);
         instance.name = "Placed_" + item.itemName;
         instance.transform.localScale = scale;
+        ApplyPlacedFurnitureLayer(instance);
         EnsureSelectableCollider(instance);
 
         placedFurniture.Add(instance);
@@ -778,10 +789,10 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private void ClearSelectedFurniture()
     {
+        FinishARFurnitureDrag();
         DestroySelectionVisual();
         selectedPlacedFurniture = null;
         isDraggingSelectedFurniture = false;
-        isDraggingARFurniture = false;
     }
 
     private void CreateSelectionVisual(GameObject target)
@@ -931,7 +942,7 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        if (useGridSnapForAR)
+        if (useGridSnapForAR && snapARFurnitureWhileDragging)
         {
             position = SnapPositionToGrid(position);
         }
@@ -944,7 +955,6 @@ public class FurniturePlacementManager : MonoBehaviour
 
         Quaternion rotation = selectedPlacedFurniture.transform.rotation;
         Vector3 previousPosition = selectedPlacedFurniture.transform.position;
-        RemoveAnchor(selectedPlacedFurniture);
         selectedPlacedFurniture.transform.position = position;
         if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
         {
@@ -953,7 +963,66 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        TryAnchorPlacedFurniture(selectedPlacedFurniture, hitPlane, new Pose(position, rotation));
+        activeARDragPlane = hitPlane;
+        activeARDragPose = new Pose(position, rotation);
+        hasActiveARDragPose = true;
+    }
+
+    private void BeginARFurnitureDrag()
+    {
+        if (selectedPlacedFurniture == null)
+        {
+            return;
+        }
+
+        if (!isDraggingARFurniture)
+        {
+            RemoveAnchor(selectedPlacedFurniture);
+        }
+
+        activeARDragPlane = null;
+        activeARDragPose = new Pose(selectedPlacedFurniture.transform.position, selectedPlacedFurniture.transform.rotation);
+        hasActiveARDragPose = true;
+        isDraggingARFurniture = true;
+    }
+
+    private void FinishARFurnitureDrag()
+    {
+        if (!isDraggingARFurniture)
+        {
+            return;
+        }
+
+        isDraggingARFurniture = false;
+
+        if (selectedPlacedFurniture == null)
+        {
+            activeARDragPlane = null;
+            hasActiveARDragPose = false;
+            return;
+        }
+
+        Pose finalPose = hasActiveARDragPose
+            ? activeARDragPose
+            : new Pose(selectedPlacedFurniture.transform.position, selectedPlacedFurniture.transform.rotation);
+
+        if (useGridSnapForAR && !snapARFurnitureWhileDragging)
+        {
+            finalPose.position = SnapPositionToGrid(finalPose.position);
+            Vector3 previousPosition = selectedPlacedFurniture.transform.position;
+            selectedPlacedFurniture.transform.position = finalPose.position;
+
+            if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
+            {
+                selectedPlacedFurniture.transform.position = previousPosition;
+                finalPose.position = previousPosition;
+                ARDiagnostics.Report("Snap final cancelado: colision detectada.");
+            }
+        }
+
+        TryAnchorPlacedFurniture(selectedPlacedFurniture, activeARDragPlane, finalPose);
+        activeARDragPlane = null;
+        hasActiveARDragPose = false;
     }
 
     private bool IsPointerOverBlockingUI(Vector2 screenPoint, int pointerId)
@@ -1427,6 +1496,38 @@ public class FurniturePlacementManager : MonoBehaviour
     private static float SafeDivide(float value, float divisor)
     {
         return Mathf.Abs(divisor) > 0.0001f ? value / Mathf.Abs(divisor) : value;
+    }
+
+    private void EnsurePlacedFurnitureLayerMask()
+    {
+        int placedLayer = LayerMask.NameToLayer(PlacedFurnitureLayerName);
+        if (placedLayer < 0)
+        {
+            return;
+        }
+
+        placedFurnitureLayerMask.value |= 1 << placedLayer;
+    }
+
+    private static void ApplyPlacedFurnitureLayer(GameObject instance)
+    {
+        int placedLayer = LayerMask.NameToLayer(PlacedFurnitureLayerName);
+        if (placedLayer < 0 || instance == null)
+        {
+            return;
+        }
+
+        SetLayerRecursively(instance.transform, placedLayer);
+    }
+
+    private static void SetLayerRecursively(Transform target, int layer)
+    {
+        target.gameObject.layer = layer;
+
+        for (int i = 0; i < target.childCount; i++)
+        {
+            SetLayerRecursively(target.GetChild(i), layer);
+        }
     }
 
     private bool IsWithinPlacementDistance(Vector3 worldPosition)
