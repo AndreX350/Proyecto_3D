@@ -172,6 +172,8 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             arSession.enabled = true;
             arSession.requestedTrackingMode = TrackingMode.PositionAndRotation;
+            arSession.matchFrameRateRequested = true;
+            TrySetARSessionBool(arSession, "resetTrackingOnWake", false);
         }
 
         if (roomColorManager == null)
@@ -1384,8 +1386,14 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private void TryAnchorPlacedFurniture(GameObject placed, ARPlane plane = null, Pose? pose = null)
     {
-        if (!anchorARPlacedFurniture || placed == null || !UsesARTapPlacement)
+        if (placed == null)
         {
+            return;
+        }
+
+        if (!anchorARPlacedFurniture || !UsesARTapPlacement)
+        {
+            placed.transform.SetParent(null, true);
             return;
         }
 
@@ -1411,7 +1419,15 @@ public class FurniturePlacementManager : MonoBehaviour
 
         if (placed.GetComponent<ARAnchor>() == null)
         {
-            placed.AddComponent<ARAnchor>();
+            try
+            {
+                placed.AddComponent<ARAnchor>();
+            }
+            catch (System.Exception exception)
+            {
+                placed.transform.SetParent(null, true);
+                Debug.LogWarning("FurniturePlacementManager: no se pudo crear ARAnchor fallback. " + exception.Message);
+            }
         }
     }
 
@@ -1593,5 +1609,19 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static void TrySetARSessionBool(ARSession arSession, string propertyName, bool value)
+    {
+        if (arSession == null)
+        {
+            return;
+        }
+
+        System.Reflection.PropertyInfo property = typeof(ARSession).GetProperty(propertyName);
+        if (property != null && property.CanWrite && property.PropertyType == typeof(bool))
+        {
+            property.SetValue(arSession, value);
+        }
     }
 }

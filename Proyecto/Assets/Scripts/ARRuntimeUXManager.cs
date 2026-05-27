@@ -88,11 +88,11 @@ public class ARRuntimeUXManager : MonoBehaviour
         }
         else if (vertical <= 0)
         {
-            guidance = "Piso detectado. Ahora apunta a una pared para poder pintarla.";
+            guidance = "Piso detectado. Apunta a una pared: aparecera un recuadro azul. Luego toca la pared para seleccionarla y poder pintarla.";
         }
         else
         {
-            guidance = "Listo: piso y paredes detectadas.";
+            guidance = "Listo: toca una pared para seleccionarla y aplica color.";
         }
 
         Rect box = new Rect(20, 120, Screen.width - 40, 86);

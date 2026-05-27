@@ -16,10 +16,12 @@ public class ARSurfaceDetectionManager : MonoBehaviour
     private ARPlaneManager planeManager;
     private PlaneDetectionMode lastRequestedDetectionMode = PlaneDetectionMode.None;
     private bool hasConfiguredDetectionMode;
+    private float forceFullDetectionUntil;
 
     private void Awake()
     {
         ResolvePlaneManager();
+        forceFullDetectionUntil = Time.unscaledTime + 2f;
         ConfigurePlaneDetection();
         HideAllPlaneVisuals();
     }
@@ -62,15 +64,23 @@ public class ARSurfaceDetectionManager : MonoBehaviour
             return;
         }
 
-        PlaneDetectionMode mode = PlaneDetectionMode.None;
-        if (detectHorizontalPlanes)
+        PlaneDetectionMode mode;
+        if (Time.unscaledTime < forceFullDetectionUntil)
         {
-            mode |= PlaneDetectionMode.Horizontal;
+            mode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
         }
-
-        if (detectVerticalPlanes)
+        else
         {
-            mode |= PlaneDetectionMode.Vertical;
+            mode = PlaneDetectionMode.None;
+            if (detectHorizontalPlanes)
+            {
+                mode |= PlaneDetectionMode.Horizontal;
+            }
+
+            if (detectVerticalPlanes)
+            {
+                mode |= PlaneDetectionMode.Vertical;
+            }
         }
 
         if (hasConfiguredDetectionMode &&

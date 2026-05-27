@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -13,7 +14,7 @@ public class RoomColorManager : MonoBehaviour
     private float arWallOverlayAlpha = 0.45f;
 
     [SerializeField]
-    private float detectedWallOverlayAlpha = 0.18f;
+    private float detectedWallOverlayAlpha = 0.35f;
 
     [SerializeField]
     private float selectedWallOverlayAlpha = 0.68f;
@@ -28,7 +29,7 @@ public class RoomColorManager : MonoBehaviour
     private float minimumARWallSize = 0.25f;
 
     [SerializeField]
-    private float wallSelectionScreenPadding = 90f;
+    private float wallSelectionScreenPadding = 150f;
 
     [SerializeField]
     private float selectedWallBoostDuration = 0.8f;
@@ -52,6 +53,7 @@ public class RoomColorManager : MonoBehaviour
     private float verticalDetectionReadyTime;
     private Color pendingWallColor = Color.white;
     private bool hasPendingWallColor;
+    private bool isRetryingWallSelection;
 
     private const TrackableType WallRaycastTrackables =
         TrackableType.PlaneWithinPolygon |
@@ -69,7 +71,7 @@ public class RoomColorManager : MonoBehaviour
     private void Awake()
     {
         ResolveARManagers();
-        verticalDetectionReadyTime = Time.unscaledTime + 1f;
+        verticalDetectionReadyTime = Time.unscaledTime + 0.3f;
 
         if (wallRenderers.Count == 0)
         {
@@ -217,16 +219,31 @@ public class RoomColorManager : MonoBehaviour
 
         AddDetectedARWalls();
 
-        if (!TryGetVerticalWallHit(screenPoint, WallRaycastTrackables, out ARPlane plane))
+        if (!TrySelectWallImmediate(screenPoint, out ARPlane plane))
         {
-            if (!TryGetVerticalWallHit(screenPoint, TrackableType.PlaneEstimated, out plane) &&
-                !TryGetClosestVerticalWallAtScreenPoint(screenPoint, out plane))
-            {
-                ARDiagnostics.Report("Raycast AR a pared sin plano vertical util.");
-                return false;
-            }
+            TryScheduleWallSelectionRetry(screenPoint);
+            ARDiagnostics.Report("Raycast AR a pared sin plano vertical util.");
+            return false;
         }
 
+        SelectARWall(plane);
+        return true;
+    }
+
+    private bool TrySelectWallImmediate(Vector2 screenPoint, out ARPlane plane)
+    {
+        plane = null;
+        if (!TryGetVerticalWallHit(screenPoint, WallRaycastTrackables, out plane))
+        {
+            return TryGetVerticalWallHit(screenPoint, TrackableType.PlaneEstimated, out plane) ||
+                TryGetClosestVerticalWallAtScreenPoint(screenPoint, out plane);
+        }
+
+        return true;
+    }
+
+    private void SelectARWall(ARPlane plane)
+    {
         selectedARWall = plane;
         Renderer renderer = EnsureARWallOverlay(plane);
         if (renderer != null && !wallRenderers.Contains(renderer))
@@ -239,7 +256,6 @@ public class RoomColorManager : MonoBehaviour
 
         Debug.Log("Pared AR seleccionada para color.");
         ARDiagnostics.Report(GetSelectedWallShortName());
-        return true;
     }
 
     public void ClearSelectedWall()
@@ -367,6 +383,7 @@ public class RoomColorManager : MonoBehaviour
         }
 
         float bestScore = float.MaxValue;
+        bool hasVisibleWallRect = false;
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
             if (plane == null || plane.alignment != PlaneAlignment.Vertical)
@@ -378,6 +395,8 @@ public class RoomColorManager : MonoBehaviour
             {
                 continue;
             }
+
+            hasVisibleWallRect = true;
 
             Rect paddedRect = screenRect;
             paddedRect.xMin -= wallSelectionScreenPadding;
@@ -395,6 +414,33 @@ public class RoomColorManager : MonoBehaviour
             if (score < bestScore)
             {
                 bestScore = score;
+                wallPlane = plane;
+            }
+        }
+
+        if (wallPlane != null)
+        {
+            return true;
+        }
+
+        if (hasVisibleWallRect)
+        {
+            return false;
+        }
+
+        Vector3 cameraPosition = camera.transform.position;
+        float minDistance = float.MaxValue;
+        foreach (ARPlane plane in arPlaneManager.trackables)
+        {
+            if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+            {
+                continue;
+            }
+
+            float distance = Vector3.Distance(cameraPosition, plane.transform.position);
+            if (distance < minDistance)
+            {
+                minDistance = distance;
                 wallPlane = plane;
             }
         }
@@ -471,6 +517,11 @@ public class RoomColorManager : MonoBehaviour
             {
                 wallRenderers.Add(renderer);
             }
+
+            if (renderer != null && !arWallAppliedColors.ContainsKey(plane))
+            {
+                ApplyColorToRenderer(renderer, detectedWallTint, detectedWallOverlayAlpha);
+            }
         }
     }
 
@@ -499,6 +550,8 @@ public class RoomColorManager : MonoBehaviour
 
         MeshFilter meshFilter = overlay.AddComponent<MeshFilter>();
         MeshRenderer renderer = overlay.AddComponent<MeshRenderer>();
+        renderer.receiveShadows = false;
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         renderer.sharedMaterial = CreateARWallMaterial(detectedWallTint, detectedWallOverlayAlpha);
 
         LineRenderer outline = overlay.AddComponent<LineRenderer>();
@@ -581,6 +634,12 @@ public class RoomColorManager : MonoBehaviour
             outline.SetPosition(2, mesh.vertices[3]);
             outline.SetPosition(3, mesh.vertices[2]);
         }
+
+        Renderer renderer = meshFilter.GetComponent<Renderer>();
+        if (renderer != null && !arWallAppliedColors.ContainsKey(plane))
+        {
+            ApplyColorToRenderer(renderer, detectedWallTint, detectedWallOverlayAlpha);
+        }
     }
 
     private void ApplyColorToRenderer(Renderer wallRenderer, Color color)
@@ -591,9 +650,19 @@ public class RoomColorManager : MonoBehaviour
         }
 
         bool isARWall = wallRenderer.GetComponentInParent<ARPlane>() != null;
-        Color appliedColor = isARWall
-            ? new Color(color.r, color.g, color.b, arWallOverlayAlpha)
-            : color;
+        float alpha = isARWall ? arWallOverlayAlpha : color.a;
+        ApplyColorToRenderer(wallRenderer, color, alpha);
+    }
+
+    private void ApplyColorToRenderer(Renderer wallRenderer, Color color, float alpha)
+    {
+        if (wallRenderer == null)
+        {
+            return;
+        }
+
+        bool isARWall = wallRenderer.GetComponentInParent<ARPlane>() != null;
+        Color appliedColor = isARWall ? new Color(color.r, color.g, color.b, alpha) : color;
         Material wallMaterial = wallRenderer.material;
         ConfigureMaterialForColor(wallMaterial, appliedColor, isARWall);
     }
@@ -714,6 +783,7 @@ public class RoomColorManager : MonoBehaviour
         SetFloatIfMaterialHasProperty(material, "_ZWrite", 0);
         SetFloatIfMaterialHasProperty(material, "_Cull", (int)UnityEngine.Rendering.CullMode.Off);
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.SetInt("_ZWrite", 0);
         material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
     }
 
@@ -733,5 +803,33 @@ public class RoomColorManager : MonoBehaviour
         }
 
         return SceneManager.GetActiveScene().name == "ARScene";
+    }
+
+    private void TryScheduleWallSelectionRetry(Vector2 screenPoint)
+    {
+        if (isRetryingWallSelection)
+        {
+            return;
+        }
+
+        StartCoroutine(RetryWallSelection(screenPoint));
+    }
+
+    private IEnumerator RetryWallSelection(Vector2 screenPoint)
+    {
+        isRetryingWallSelection = true;
+        yield return new WaitForSeconds(0.3f);
+
+        ResolveARManagers();
+        AddDetectedARWalls();
+        if (arRaycastManager != null &&
+            arPlaneManager != null &&
+            TrySelectWallImmediate(screenPoint, out ARPlane plane))
+        {
+            SelectARWall(plane);
+            ARDiagnostics.Report("Pared AR seleccionada en reintento.");
+        }
+
+        isRetryingWallSelection = false;
     }
 }

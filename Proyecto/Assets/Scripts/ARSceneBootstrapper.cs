@@ -296,7 +296,11 @@ public class ARSceneBootstrapper : MonoBehaviour
                 int vertical = Convert.ToInt32(Enum.Parse(planeDetectionModeType, "Vertical"));
                 object combined = Enum.ToObject(planeDetectionModeType, horizontal | vertical);
                 requestedDetectionModeProperty.SetValue(planeManager, combined);
+                EnableComponent(planeManager);
+                return;
             }
+
+            EnableComponent(planeManager);
         }
         catch
         {
