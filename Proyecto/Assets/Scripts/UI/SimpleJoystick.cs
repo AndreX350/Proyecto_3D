@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IDragHandler
 {
@@ -34,7 +35,50 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
             canvasGroup = GetComponent<CanvasGroup>();
         }
 
+        GenerateCircularHandleSprite();
+
         ApplyIdleVisualState();
+    }
+
+    private void GenerateCircularHandleSprite()
+    {
+        if (handle == null) return;
+
+        Image handleImage = handle.GetComponent<Image>();
+        if (handleImage == null) return;
+
+        if (handleImage.sprite != null) return;
+
+        int size = 128;
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        float center = size * 0.5f;
+        float radius = size * 0.45f;
+        float radiusSq = radius * radius;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x - center;
+                float dy = y - center;
+                float distSq = dx * dx + dy * dy;
+                Color c = distSq <= radiusSq ? Color.white : Color.clear;
+
+                if (distSq > radiusSq * 0.85f && distSq <= radiusSq)
+                {
+                    c = Color.Lerp(Color.white, Color.clear, (distSq - radiusSq * 0.85f) / (radiusSq * 0.15f));
+                }
+
+                tex.SetPixel(x, y, c);
+            }
+        }
+
+        tex.Apply();
+
+        Sprite sprite = Sprite.Create(tex, new Rect(0, 0, size, size), Vector2.one * 0.5f, 100f);
+        sprite.name = "GeneratedCircleHandle";
+        handleImage.sprite = sprite;
     }
 
     public void OnPointerDown(PointerEventData eventData)
