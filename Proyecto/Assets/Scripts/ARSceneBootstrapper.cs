@@ -7,6 +7,9 @@ public class ARSceneBootstrapper : MonoBehaviour
     [SerializeField]
     private bool hideDemoRoomObjects = true;
 
+    [SerializeField]
+    private GameObject defaultPlanePrefab = null;
+
     private void Start()
     {
         if (hideDemoRoomObjects)
@@ -71,6 +74,7 @@ public class ARSceneBootstrapper : MonoBehaviour
         if (arPlaneManagerType != null)
         {
             Component planeManager = AddComponentIfMissing(originObject, arPlaneManagerType);
+            SetPlanePrefab(planeManager);
             SetPlaneDetectionMode(planeManager);
             EnableComponent(planeManager);
         }
@@ -276,6 +280,28 @@ public class ARSceneBootstrapper : MonoBehaviour
         if (cameraOffsetProperty != null && cameraOffsetProperty.CanWrite)
         {
             cameraOffsetProperty.SetValue(origin, cameraOffset.gameObject);
+        }
+    }
+
+    private void SetPlanePrefab(Component planeManager)
+    {
+        if (planeManager == null || defaultPlanePrefab == null)
+        {
+            return;
+        }
+
+        PropertyInfo planePrefabProperty = planeManager.GetType().GetProperty("planePrefab");
+        if (planePrefabProperty == null ||
+            !planePrefabProperty.CanRead ||
+            !planePrefabProperty.CanWrite ||
+            planePrefabProperty.PropertyType != typeof(GameObject))
+        {
+            return;
+        }
+
+        if (planePrefabProperty.GetValue(planeManager) == null)
+        {
+            planePrefabProperty.SetValue(planeManager, defaultPlanePrefab);
         }
     }
 

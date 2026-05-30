@@ -179,11 +179,11 @@ public class ARRuntimeUXManager : MonoBehaviour
 
         foreach (ARPlane plane in planeManager.trackables)
         {
-            if (plane.alignment == PlaneAlignment.HorizontalUp)
+            if (plane.alignment.IsHorizontal())
             {
                 horizontal++;
             }
-            else if (plane.alignment == PlaneAlignment.Vertical)
+            else if (plane.alignment.IsVertical())
             {
                 vertical++;
             }

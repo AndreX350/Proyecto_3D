@@ -43,17 +43,27 @@ public static class ARDiagnostics
         bool hasAnchorManager,
         bool hasSelectedFurniture,
         int detectedHorizontalPlanes,
-        int detectedVerticalPlanes)
+        int detectedVerticalPlanes,
+        int detectedOtherPlanes,
+        int trackingPlanes,
+        string requestedDetectionMode,
+        string currentDetectionMode,
+        bool hasPlanePrefab)
     {
         StringBuilder builder = new StringBuilder(256);
         builder.AppendLine("AR DEBUG");
         builder.Append("Placement: ").AppendLine(arPlacementEnabled ? "ON" : "OFF");
         builder.Append("ARRaycastManager: ").AppendLine(hasRaycastManager ? "OK" : "MISSING");
         builder.Append("ARPlaneManager: ").AppendLine(hasPlaneManager ? "OK" : "MISSING");
+        builder.Append("Plane Prefab: ").AppendLine(hasPlanePrefab ? "OK" : "MISSING");
+        builder.Append("Requested Mode: ").AppendLine(requestedDetectionMode);
+        builder.Append("Current Mode: ").AppendLine(currentDetectionMode);
         builder.Append("ARAnchorManager: ").AppendLine(hasAnchorManager ? "OK" : "MISSING");
         builder.Append("Mueble seleccionado: ").AppendLine(hasSelectedFurniture ? "SI" : "NO");
         builder.Append("Planos H detectados: ").AppendLine(detectedHorizontalPlanes.ToString());
         builder.Append("Planos V detectados: ").AppendLine(detectedVerticalPlanes.ToString());
+        builder.Append("Planos otros: ").AppendLine(detectedOtherPlanes.ToString());
+        builder.Append("Planos tracking: ").AppendLine(trackingPlanes.ToString());
         builder.Append("Ultimo evento: ").AppendLine(lastStatus);
         builder.Append("Hace: ").Append((Time.unscaledTime - lastStatusTime).ToString("0.0")).AppendLine("s");
         return builder.ToString();

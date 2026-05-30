@@ -93,7 +93,7 @@ public class ARSurfaceDetectionManager : MonoBehaviour
         planeManager.requestedDetectionMode = mode;
         lastRequestedDetectionMode = mode;
         hasConfiguredDetectionMode = true;
-        ARDiagnostics.Report("PlaneDetectionMode activo: " + mode);
+        ARDiagnostics.Report("PlaneDetectionMode solicitado: " + mode + " | actual: " + planeManager.currentDetectionMode);
     }
 
     private void OnPlanesChanged(ARPlanesChangedEventArgs args)

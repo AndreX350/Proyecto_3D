@@ -1339,7 +1339,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e1760703bbd54c04488a8d10600262ab, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_PlanePrefab: {fileID: 0}
+  m_PlanePrefab: {fileID: 8258681095012561029, guid: c63d835e6e6c7334691a87baff64d22b, type: 3}
   m_DetectionMode: -1
 --- !u!114 &298747083
 MonoBehaviour:
@@ -4844,6 +4844,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   hideDemoRoomObjects: 1
+  defaultPlanePrefab: {fileID: 8258681095012561029, guid: c63d835e6e6c7334691a87baff64d22b, type: 3}
 --- !u!4 &960592836
 Transform:
   m_ObjectHideFlags: 0

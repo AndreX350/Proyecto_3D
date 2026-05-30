@@ -57,7 +57,8 @@ public class RoomColorManager : MonoBehaviour
 
     private const TrackableType WallRaycastTrackables =
         TrackableType.PlaneWithinPolygon |
-        TrackableType.PlaneWithinBounds;
+        TrackableType.PlaneWithinBounds |
+        TrackableType.PlaneWithinInfinity;
 
     private static readonly HashSet<string> AllowedWallNames = new HashSet<string>
     {
