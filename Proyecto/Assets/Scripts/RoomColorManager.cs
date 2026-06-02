@@ -26,10 +26,16 @@ public class RoomColorManager : MonoBehaviour
     private Color selectedWallTint = new Color(1f, 0.35f, 0.9f, 1f);
 
     [SerializeField]
-    private float minimumARWallSize = 0.25f;
+    private float minimumARWallSize = 0.12f;
+
+    [SerializeField]
+    private float relaxedMinimumARWallSize = 0.06f;
 
     [SerializeField]
     private float wallSelectionScreenPadding = 150f;
+
+    [SerializeField]
+    private float maxWallSelectionDistance = 8.5f;
 
     [SerializeField]
     private float selectedWallBoostDuration = 0.8f;
@@ -39,6 +45,15 @@ public class RoomColorManager : MonoBehaviour
 
     [SerializeField]
     private bool requireExplicitApplyInAR = true;
+
+    [SerializeField]
+    private bool autoApplyPendingColorOnWallSelect = true;
+
+    [SerializeField]
+    private int wallSelectionRetryAttempts = 6;
+
+    [SerializeField]
+    private float wallSelectionRetryInterval = 0.22f;
 
     private Color currentWallColor = Color.white;
     private bool hasCurrentWallColor;
@@ -54,6 +69,7 @@ public class RoomColorManager : MonoBehaviour
     private Color pendingWallColor = Color.white;
     private bool hasPendingWallColor;
     private bool isRetryingWallSelection;
+    private float lastVerticalWallSeenTime = float.NegativeInfinity;
 
     private const TrackableType WallRaycastTrackables =
         TrackableType.PlaneWithinPolygon |
@@ -171,14 +187,20 @@ public class RoomColorManager : MonoBehaviour
 
     public bool HasPendingWallColor() => hasPendingWallColor;
 
+    public bool ShouldPrioritizeWallSelection() => hasPendingWallColor;
+
     public bool HasAppliedWallColor() => hasCurrentWallColor || arWallAppliedColors.Count > 0;
 
     public string GetWallStatusText()
     {
         string selectedLabel = GetSelectedWallShortName();
+        int trackedWalls = CountTrackedVerticalWalls();
         string pendingLabel = hasPendingWallColor ? "Color pendiente" : "Sin color pendiente";
         string appliedLabel = HasAppliedWallColor() ? "Color aplicado" : "Sin color aplicado";
-        return selectedLabel + "\n" + pendingLabel + "\n" + appliedLabel;
+        return selectedLabel + "\n" +
+            "Paredes detectadas: " + trackedWalls + "\n" +
+            pendingLabel + "\n" +
+            appliedLabel;
     }
 
     private int GetWallIndex(ARPlane wall)
@@ -191,7 +213,7 @@ public class RoomColorManager : MonoBehaviour
         int index = 1;
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+            if (!IsVerticalLikePlane(plane))
             {
                 continue;
             }
@@ -257,6 +279,14 @@ public class RoomColorManager : MonoBehaviour
 
         Debug.Log("Pared AR seleccionada para color.");
         ARDiagnostics.Report(GetSelectedWallShortName());
+
+        if (autoApplyPendingColorOnWallSelect && hasPendingWallColor)
+        {
+            Color queuedColor = pendingWallColor;
+            hasPendingWallColor = false;
+            ApplyWallColor(queuedColor);
+            ARDiagnostics.Report("Color pendiente aplicado automaticamente a la pared seleccionada.");
+        }
     }
 
     public void ClearSelectedWall()
@@ -354,19 +384,44 @@ public class RoomColorManager : MonoBehaviour
             return false;
         }
 
-        foreach (ARRaycastHit hit in arHits)
+        Camera camera = Camera.main;
+        float bestScore = float.MaxValue;
+        for (int i = 0; i < arHits.Count; i++)
         {
+            ARRaycastHit hit = arHits[i];
             ARPlane plane = arPlaneManager.GetPlane(hit.trackableId);
-            if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+            if (!IsUsableVerticalPlane(plane, true))
+            {
+                plane = TryFindNearestVerticalPlane(hit.pose.position, true);
+                if (!IsUsableVerticalPlane(plane, true))
+                {
+                    continue;
+                }
+            }
+
+            if (!IsPlaneWithinSelectionDistance(camera, plane))
             {
                 continue;
             }
 
-            wallPlane = plane;
-            return true;
+            float score = hit.distance;
+            if (camera != null)
+            {
+                Vector3 projected = camera.WorldToScreenPoint(plane.center);
+                if (projected.z > 0f)
+                {
+                    score += Vector2.Distance(screenPoint, new Vector2(projected.x, projected.y)) * 0.0015f;
+                }
+            }
+
+            if (score < bestScore)
+            {
+                bestScore = score;
+                wallPlane = plane;
+            }
         }
 
-        return false;
+        return wallPlane != null;
     }
 
     private bool TryRaycastTrackedVerticalWall(Vector2 screenPoint, out ARPlane wallPlane)
@@ -388,13 +443,18 @@ public class RoomColorManager : MonoBehaviour
 
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (!IsUsableVerticalPlane(plane))
+            if (!IsUsableVerticalPlane(plane, true))
             {
                 continue;
             }
 
             Plane worldPlane = new Plane(plane.normal, plane.center);
             if (!worldPlane.Raycast(ray, out float distance) || distance < 0f)
+            {
+                continue;
+            }
+
+            if (distance > maxWallSelectionDistance)
             {
                 continue;
             }
@@ -435,7 +495,7 @@ public class RoomColorManager : MonoBehaviour
         bool hasVisibleWallRect = false;
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (!IsUsableVerticalPlane(plane))
+            if (!IsUsableVerticalPlane(plane, true))
             {
                 continue;
             }
@@ -481,7 +541,7 @@ public class RoomColorManager : MonoBehaviour
         float minDistance = float.MaxValue;
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (!IsUsableVerticalPlane(plane))
+            if (!IsUsableVerticalPlane(plane, true))
             {
                 continue;
             }
@@ -502,11 +562,12 @@ public class RoomColorManager : MonoBehaviour
         screenRect = default;
 
         Vector2 size = plane.size;
-        if (size.x < minimumARWallSize || size.y < minimumARWallSize)
+        float wallMinSize = GetEffectiveMinimumWallSize(false);
+        if (size.x < wallMinSize || size.y < wallMinSize)
         {
             size = new Vector2(
-                Mathf.Max(size.x, minimumARWallSize),
-                Mathf.Max(size.y, minimumARWallSize));
+                Mathf.Max(size.x, wallMinSize),
+                Mathf.Max(size.y, wallMinSize));
         }
 
         Vector2 center = plane.centerInPlaneSpace;
@@ -547,9 +608,9 @@ public class RoomColorManager : MonoBehaviour
         return true;
     }
 
-    private bool IsUsableVerticalPlane(ARPlane plane)
+    private bool IsUsableVerticalPlane(ARPlane plane, bool relaxedSize)
     {
-        if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+        if (!IsVerticalLikePlane(plane))
         {
             return false;
         }
@@ -559,8 +620,9 @@ public class RoomColorManager : MonoBehaviour
             return false;
         }
 
+        float wallMinSize = GetEffectiveMinimumWallSize(relaxedSize);
         Vector2 size = plane.size;
-        return Mathf.Max(size.x, size.y) >= minimumARWallSize;
+        return Mathf.Max(size.x, size.y) >= wallMinSize;
     }
 
     private static bool IsPointInsidePlane(ARPlane plane, Vector2 planePoint)
@@ -615,10 +677,12 @@ public class RoomColorManager : MonoBehaviour
 
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (plane == null || plane.alignment != PlaneAlignment.Vertical)
+            if (!IsUsableVerticalPlane(plane, true))
             {
                 continue;
             }
+
+            lastVerticalWallSeenTime = Time.unscaledTime;
 
             Renderer renderer = EnsureARWallOverlay(plane);
             if (renderer != null && !wallRenderers.Contains(renderer))
@@ -695,11 +759,12 @@ public class RoomColorManager : MonoBehaviour
         }
 
         Vector2 size = plane.size;
-        if (size.x < minimumARWallSize || size.y < minimumARWallSize)
+        float wallMinSize = GetEffectiveMinimumWallSize(false);
+        if (size.x < wallMinSize || size.y < wallMinSize)
         {
             size = new Vector2(
-                Mathf.Max(size.x, minimumARWallSize),
-                Mathf.Max(size.y, minimumARWallSize));
+                Mathf.Max(size.x, wallMinSize),
+                Mathf.Max(size.y, wallMinSize));
         }
 
         Vector2 center = plane.centerInPlaneSpace;
@@ -926,18 +991,136 @@ public class RoomColorManager : MonoBehaviour
     private IEnumerator RetryWallSelection(Vector2 screenPoint)
     {
         isRetryingWallSelection = true;
-        yield return new WaitForSeconds(0.3f);
-
-        ResolveARManagers();
-        AddDetectedARWalls();
-        if (arRaycastManager != null &&
-            arPlaneManager != null &&
-            TrySelectWallImmediate(screenPoint, out ARPlane plane))
+        int attempts = Mathf.Max(1, wallSelectionRetryAttempts);
+        float waitSeconds = Mathf.Max(0.08f, wallSelectionRetryInterval);
+        for (int attempt = 1; attempt <= attempts; attempt++)
         {
-            SelectARWall(plane);
-            ARDiagnostics.Report("Pared AR seleccionada en reintento.");
+            yield return new WaitForSeconds(waitSeconds);
+            ResolveARManagers();
+            AddDetectedARWalls();
+            if (arRaycastManager == null || arPlaneManager == null)
+            {
+                continue;
+            }
+
+            if (TrySelectWallImmediate(screenPoint, out ARPlane plane))
+            {
+                SelectARWall(plane);
+                ARDiagnostics.Report("Pared AR seleccionada en reintento " + attempt + "/" + attempts + ".");
+                isRetryingWallSelection = false;
+                yield break;
+            }
         }
 
         isRetryingWallSelection = false;
+    }
+
+    private int CountTrackedVerticalWalls()
+    {
+        if (arPlaneManager == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        foreach (ARPlane plane in arPlaneManager.trackables)
+        {
+            if (IsUsableVerticalPlane(plane, true))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private float GetEffectiveMinimumWallSize(bool relaxed)
+    {
+        float strict = Mathf.Max(0.03f, minimumARWallSize);
+        if (relaxed)
+        {
+            return Mathf.Max(0.03f, Mathf.Min(strict, relaxedMinimumARWallSize));
+        }
+
+        if (HasSeenVerticalWallsRecently())
+        {
+            return strict;
+        }
+
+        return Mathf.Max(0.03f, Mathf.Min(strict, relaxedMinimumARWallSize));
+    }
+
+    private bool HasSeenVerticalWallsRecently()
+    {
+        return Time.unscaledTime - lastVerticalWallSeenTime <= 2.5f;
+    }
+
+    private static bool IsVerticalLikePlane(ARPlane plane)
+    {
+        if (plane == null)
+        {
+            return false;
+        }
+
+        if (plane.alignment.IsVertical())
+        {
+            return true;
+        }
+
+        if (plane.alignment != PlaneAlignment.NotAxisAligned)
+        {
+            return false;
+        }
+
+        return IsNearVerticalByNormal(plane.normal);
+    }
+
+    private static bool IsNearVerticalByNormal(Vector3 normal)
+    {
+        if (normal.sqrMagnitude < 0.0001f)
+        {
+            return false;
+        }
+
+        float upDot = Mathf.Abs(Vector3.Dot(normal.normalized, Vector3.up));
+        return upDot <= 0.3f;
+    }
+
+    private ARPlane TryFindNearestVerticalPlane(Vector3 worldPoint, bool relaxedSize)
+    {
+        if (arPlaneManager == null)
+        {
+            return null;
+        }
+
+        ARPlane nearest = null;
+        float bestDistance = float.MaxValue;
+        foreach (ARPlane plane in arPlaneManager.trackables)
+        {
+            if (!IsUsableVerticalPlane(plane, relaxedSize))
+            {
+                continue;
+            }
+
+            float distance = Vector3.Distance(worldPoint, plane.center);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                nearest = plane;
+            }
+        }
+
+        return nearest;
+    }
+
+    private bool IsPlaneWithinSelectionDistance(Camera camera, ARPlane plane)
+    {
+        if (camera == null || plane == null)
+        {
+            return true;
+        }
+
+        float distanceToCenter = Vector3.Distance(camera.transform.position, plane.center);
+        return distanceToCenter <= Mathf.Max(1.2f, maxWallSelectionDistance);
     }
 }

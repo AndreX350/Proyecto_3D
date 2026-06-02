@@ -275,6 +275,13 @@ public class FurniturePlacementManager : MonoBehaviour
                 return;
             }
 
+            if (ShouldPrioritizeWallSelection() && TrySelectWallAtScreenPoint(touch.position))
+            {
+                ARDiagnostics.Report("Pared AR vertical seleccionada (prioridad pintura).");
+                pendingWallRetryCount = 0;
+                return;
+            }
+
             if (TryPlaceSelectedFurnitureAtScreenPoint(touch.position))
             {
                 ARDiagnostics.Report("Mueble colocado en plano horizontal.");
@@ -289,7 +296,7 @@ public class FurniturePlacementManager : MonoBehaviour
             {
                 ARDiagnostics.Report("Tap sin hit util: ni piso horizontal ni pared vertical.");
                 pendingWallRetryPoint = touch.position;
-                pendingWallRetryTime = Time.unscaledTime + 0.5f;
+                pendingWallRetryTime = Time.unscaledTime + 0.3f;
                 pendingWallRetryCount = 1;
             }
             return;
@@ -1375,13 +1382,30 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         pendingWallRetryCount++;
-        if (pendingWallRetryCount > 2)
+        if (pendingWallRetryCount > 6)
         {
             pendingWallRetryCount = 0;
             return;
         }
 
-        pendingWallRetryTime = Time.unscaledTime + 0.5f;
+        pendingWallRetryTime = Time.unscaledTime + 0.3f;
+    }
+
+    private bool ShouldPrioritizeWallSelection()
+    {
+        if (roomColorManager == null)
+        {
+            return false;
+        }
+
+        if (!roomColorManager.ShouldPrioritizeWallSelection())
+        {
+            return false;
+        }
+
+        // Cuando hay color pendiente, evitamos que un tap accidental en piso
+        // consuma el gesto y damos prioridad a seleccionar pared.
+        return selectedFurniture == null;
     }
 
     private void TryAnchorPlacedFurniture(GameObject placed, ARPlane plane = null, Pose? pose = null)

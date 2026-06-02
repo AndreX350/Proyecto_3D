@@ -639,6 +639,11 @@ public class UIARMAnager : MonoBehaviour
                     return;
                 }
 
+                if (placementManager != null)
+                {
+                    placementManager.SelectFurniture(null);
+                }
+
                 roomColorManager.QueueWallColor(color);
                 UpdateWallStatusText();
             });
