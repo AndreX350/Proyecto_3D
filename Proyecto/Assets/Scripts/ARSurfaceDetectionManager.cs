@@ -8,6 +8,9 @@ public class ARSurfaceDetectionManager : MonoBehaviour
     private bool hidePlaneVisuals = true;
 
     [SerializeField]
+    private bool showVerticalPlaneHints = true;
+
+    [SerializeField]
     private bool detectHorizontalPlanes = true;
 
     [SerializeField]
@@ -105,12 +108,12 @@ public class ARSurfaceDetectionManager : MonoBehaviour
 
         for (int i = 0; i < args.added.Count; i++)
         {
-            HidePlaneVisuals(args.added[i]);
+            RefreshPlaneVisuals(args.added[i]);
         }
 
         for (int i = 0; i < args.updated.Count; i++)
         {
-            HidePlaneVisuals(args.updated[i]);
+            RefreshPlaneVisuals(args.updated[i]);
         }
     }
 
@@ -124,16 +127,20 @@ public class ARSurfaceDetectionManager : MonoBehaviour
         ARPlane[] planes = FindObjectsOfType<ARPlane>(true);
         for (int i = 0; i < planes.Length; i++)
         {
-            HidePlaneVisuals(planes[i]);
+            RefreshPlaneVisuals(planes[i]);
         }
     }
 
-    private static void HidePlaneVisuals(ARPlane plane)
+    private void RefreshPlaneVisuals(ARPlane plane)
     {
         if (plane == null)
         {
             return;
         }
+
+        bool shouldShowPlane = hidePlaneVisuals &&
+            showVerticalPlaneHints &&
+            IsLikelyVerticalPlane(plane);
 
         Renderer[] renderers = plane.GetComponentsInChildren<Renderer>(true);
         for (int i = 0; i < renderers.Length; i++)
@@ -143,7 +150,7 @@ public class ARSurfaceDetectionManager : MonoBehaviour
                 continue;
             }
 
-            renderers[i].enabled = false;
+            renderers[i].enabled = shouldShowPlane;
         }
 
         LineRenderer[] lineRenderers = plane.GetComponentsInChildren<LineRenderer>(true);
@@ -154,7 +161,7 @@ public class ARSurfaceDetectionManager : MonoBehaviour
                 continue;
             }
 
-            lineRenderers[i].enabled = false;
+            lineRenderers[i].enabled = shouldShowPlane;
         }
 
         Canvas[] canvases = plane.GetComponentsInChildren<Canvas>(true);
@@ -167,5 +174,26 @@ public class ARSurfaceDetectionManager : MonoBehaviour
     private static bool IsAppOverlay(GameObject target)
     {
         return target != null && target.name == "ARWallColorOverlay";
+    }
+
+    private static bool IsLikelyVerticalPlane(ARPlane plane)
+    {
+        if (plane == null)
+        {
+            return false;
+        }
+
+        if (plane.alignment.IsVertical())
+        {
+            return true;
+        }
+
+        if (plane.alignment.IsHorizontal() || plane.normal.sqrMagnitude < 0.0001f)
+        {
+            return false;
+        }
+
+        float upDot = Mathf.Abs(Vector3.Dot(plane.normal.normalized, Vector3.up));
+        return upDot <= 0.55f;
     }
 }

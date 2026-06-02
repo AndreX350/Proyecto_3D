@@ -12,6 +12,9 @@ EditorBuildSettings:
     path: Assets/Scenes/RoomSelector.unity
     guid: df57c065d8e47b8489c1bcadae83eb1f
   - enabled: 1
+    path: Assets/Scenes/Options.unity
+    guid: c5a68c41c08546a9a1d88d4bef44f436
+  - enabled: 1
     path: Assets/Scenes/RoomDemo.unity
     guid: c7b44b6e9d2342a6a9b43e441d22d001
   - enabled: 1

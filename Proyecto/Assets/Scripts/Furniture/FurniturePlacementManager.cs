@@ -53,7 +53,16 @@ public class FurniturePlacementManager : MonoBehaviour
     private float minimumHorizontalPlaneArea = 0.04f;
 
     [SerializeField]
+    private float relaxedHorizontalPlaneArea = 0.015f;
+
+    [SerializeField]
+    private float horizontalPlaneNormalDotThreshold = 0.5f;
+
+    [SerializeField]
     private float estimatedSurfaceUpDotThreshold = 0.65f;
+
+    [SerializeField]
+    private float furnitureGroundingOffset = 0.002f;
 
     [SerializeField]
     private bool useGridSnapForAR = true;
@@ -180,6 +189,9 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             roomColorManager = FindObjectOfType<RoomColorManager>();
         }
+
+        NormalizeARSensitivitySettings();
+        ConfigurePlaneDetectionMode();
     }
 
     private void Update()
@@ -229,6 +241,9 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             roomColorManager = FindObjectOfType<RoomColorManager>();
         }
+
+        NormalizeARSensitivitySettings();
+        ConfigurePlaneDetectionMode();
     }
 
     private void UpdateARPlacementInput()
@@ -498,17 +513,18 @@ public class FurniturePlacementManager : MonoBehaviour
             return false;
         }
 
-        if (!TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane))
+        FurnitureItemData item = selectedFurniture;
+        if (!TryGetBestHorizontalSurfaceHit(screenPoint, out Pose surfacePose, out ARPlane hitPlane))
         {
             ARDiagnostics.Report("No se detecto piso horizontal util en el tap.");
             return false;
         }
 
-        Pose hitPose = horizontalHit.pose;
+        Pose hitPose = surfacePose;
         Vector3 position = new Vector3(
-            hitPose.position.x + selectedFurniture.placementOffset.x,
-            hitPose.position.y,
-            hitPose.position.z + selectedFurniture.placementOffset.z);
+            hitPose.position.x + item.placementOffset.x,
+            hitPose.position.y + item.placementOffset.y,
+            hitPose.position.z + item.placementOffset.z);
         if (!IsWithinPlacementDistance(position))
         {
             ARDiagnostics.Report("No se puede colocar: demasiado lejos de la camara.");
@@ -521,11 +537,13 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         Quaternion rotation = Quaternion.Euler(0f, hitPose.rotation.eulerAngles.y, 0f);
-        GameObject placed = PlaceFurnitureAt(selectedFurniture, position, rotation);
+        GameObject placed = PlaceFurnitureAt(item, position, rotation);
         if (placed == null)
         {
             return false;
         }
+
+        AlignFurnitureBottomToSurface(placed, hitPose.position.y + item.placementOffset.y);
 
         if (preventPlacementOnCollision && IsPlacementColliding(placed))
         {
@@ -539,7 +557,7 @@ public class FurniturePlacementManager : MonoBehaviour
             return false;
         }
 
-        TryAnchorPlacedFurniture(placed, hitPlane, new Pose(position, rotation));
+        TryAnchorPlacedFurniture(placed, hitPlane, new Pose(placed.transform.position, placed.transform.rotation));
         selectedFurniture = null;
         SetSelectedFurniture(placed);
         UpdatePlacementReticle(false, default);
@@ -626,7 +644,7 @@ public class FurniturePlacementManager : MonoBehaviour
         return true;
     }
 
-    public void DeleteSelectedFurniture()
+    public bool DeleteSelectedFurniture()
     {
         RefreshPlacedFurnitureList();
 
@@ -634,7 +652,7 @@ public class FurniturePlacementManager : MonoBehaviour
         if (target == null)
         {
             Debug.LogWarning("FurniturePlacementManager: no selected furniture to delete.");
-            return;
+            return false;
         }
 
         placedFurniture.Remove(target);
@@ -651,6 +669,7 @@ public class FurniturePlacementManager : MonoBehaviour
         selectedPlacedFurniture = null;
         DestroyPlacedFurniture(target);
         Debug.Log("Deleted selected furniture.");
+        return true;
     }
 
     public void RotateLastFurniture()
@@ -923,6 +942,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         target.transform.position = floorPoint;
+        AlignFurnitureBottomToSurface(target, floorPoint.y);
         SetSelectedFurniture(target);
         return true;
     }
@@ -935,22 +955,23 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         if (arRaycastManager != null &&
-            TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane))
+            TryGetBestHorizontalSurfaceHit(screenPoint, out Pose surfacePose, out ARPlane hitPlane))
         {
-            MoveSelectedARFurniture(horizontalHit.pose.position, hitPlane);
+            MoveSelectedARFurniture(surfacePose, hitPlane);
             return true;
         }
 
         return false;
     }
 
-    private void MoveSelectedARFurniture(Vector3 position, ARPlane hitPlane)
+    private void MoveSelectedARFurniture(Pose surfacePose, ARPlane hitPlane)
     {
         if (selectedPlacedFurniture == null)
         {
             return;
         }
 
+        Vector3 position = surfacePose.position;
         if (useGridSnapForAR && snapARFurnitureWhileDragging)
         {
             position = SnapPositionToGrid(position);
@@ -965,6 +986,7 @@ public class FurniturePlacementManager : MonoBehaviour
         Quaternion rotation = selectedPlacedFurniture.transform.rotation;
         Vector3 previousPosition = selectedPlacedFurniture.transform.position;
         selectedPlacedFurniture.transform.position = position;
+        AlignFurnitureBottomToSurface(selectedPlacedFurniture, surfacePose.position.y);
         if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
         {
             selectedPlacedFurniture.transform.position = previousPosition;
@@ -973,7 +995,7 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         activeARDragPlane = hitPlane;
-        activeARDragPose = new Pose(position, rotation);
+        activeARDragPose = new Pose(selectedPlacedFurniture.transform.position, rotation);
         hasActiveARDragPose = true;
     }
 
@@ -1180,33 +1202,44 @@ public class FurniturePlacementManager : MonoBehaviour
         return height <= Screen.height * 0.7f && width <= Screen.width * 1.15f;
     }
 
-    private bool TryGetBestHorizontalSurfaceHit(Vector2 screenPoint, out ARRaycastHit horizontalHit, out ARPlane hitPlane)
+    private bool TryGetBestHorizontalSurfaceHit(Vector2 screenPoint, out Pose surfacePose, out ARPlane hitPlane)
     {
-        TrackableType preciseMask =
+        surfacePose = default;
+        hitPlane = null;
+
+        if (arRaycastManager == null)
+        {
+            return false;
+        }
+
+        TrackableType surfaceMask =
             TrackableType.PlaneWithinPolygon |
             TrackableType.PlaneWithinBounds |
-            TrackableType.PlaneWithinInfinity;
+            TrackableType.PlaneWithinInfinity |
+            TrackableType.PlaneEstimated;
 
-        if (arRaycastManager.Raycast(screenPoint, arHits, preciseMask) &&
-            TryGetHorizontalPlaneHit(out horizontalHit, out hitPlane, true))
+        arHits.Clear();
+        if (arRaycastManager.Raycast(screenPoint, arHits, surfaceMask) &&
+            TryGetHorizontalPlaneHit(out surfacePose, out hitPlane))
         {
             return true;
         }
 
-        TrackableType estimatedMask = preciseMask | TrackableType.PlaneEstimated;
-        if (arRaycastManager.Raycast(screenPoint, arHits, estimatedMask) &&
-            TryGetHorizontalPlaneHit(out horizontalHit, out hitPlane, false))
+        if (TryRaycastTrackedHorizontalPlane(screenPoint, out surfacePose, out hitPlane))
         {
             return true;
         }
 
-        horizontalHit = default;
-        hitPlane = null;
         return false;
     }
 
-    private bool TryGetHorizontalPlaneHit(out ARRaycastHit horizontalHit, out ARPlane hitPlane, bool requireKnownPlane)
+    private bool TryGetHorizontalPlaneHit(out Pose surfacePose, out ARPlane hitPlane)
     {
+        surfacePose = default;
+        hitPlane = null;
+        float bestScore = float.MaxValue;
+        bool hasHit = false;
+
         for (int i = 0; i < arHits.Count; i++)
         {
             ARPlane plane = arPlaneManager != null ? arPlaneManager.GetPlane(arHits[i].trackableId) : null;
@@ -1218,46 +1251,163 @@ public class FurniturePlacementManager : MonoBehaviour
                     continue;
                 }
 
-                horizontalHit = arHits[i];
+                float score = GetHorizontalHitScore(arHits[i], 0f);
+                if (score >= bestScore)
+                {
+                    continue;
+                }
+
+                surfacePose = CreateHorizontalPose(arHits[i].pose.position, arHits[i].pose.rotation);
                 hitPlane = plane;
-                return true;
+                bestScore = score;
+                hasHit = true;
+                continue;
             }
 
-            if (requireKnownPlane || !IsEstimatedHorizontalHit(arHits[i]))
+            if (!IsEstimatedHorizontalHit(arHits[i]))
             {
                 continue;
             }
 
-            horizontalHit = arHits[i];
+            float estimatedScore = GetHorizontalHitScore(arHits[i], 0.35f);
+            if (estimatedScore >= bestScore)
+            {
+                continue;
+            }
+
+            surfacePose = CreateHorizontalPose(arHits[i].pose.position, arHits[i].pose.rotation);
             hitPlane = null;
+            bestScore = estimatedScore;
+            hasHit = true;
+        }
+
+        return hasHit;
+    }
+
+    private bool TryRaycastTrackedHorizontalPlane(Vector2 screenPoint, out Pose surfacePose, out ARPlane hitPlane)
+    {
+        surfacePose = default;
+        hitPlane = null;
+
+        if (arPlaneManager == null)
+        {
+            return false;
+        }
+
+        Camera cam = GetPlacementCamera();
+        if (cam == null)
+        {
+            return false;
+        }
+
+        Ray ray = cam.ScreenPointToRay(screenPoint);
+        float bestDistance = float.MaxValue;
+        foreach (ARPlane plane in arPlaneManager.trackables)
+        {
+            if (!IsUsableHorizontalPlane(plane))
+            {
+                continue;
+            }
+
+            Plane worldPlane = new Plane(plane.normal, plane.center);
+            if (!worldPlane.Raycast(ray, out float distance) || distance < 0f || distance > maxARPlacementDistance)
+            {
+                continue;
+            }
+
+            Vector3 worldPoint = ray.GetPoint(distance);
+            if (!IsPointNearPlaneBounds(plane, worldPoint, 0.18f))
+            {
+                continue;
+            }
+
+            if (distance >= bestDistance)
+            {
+                continue;
+            }
+
+            surfacePose = CreateHorizontalPose(worldPoint, Quaternion.Euler(0f, cam.transform.eulerAngles.y, 0f));
+            hitPlane = plane;
+            bestDistance = distance;
+        }
+
+        return hitPlane != null;
+    }
+
+    private bool IsHorizontalPlane(ARPlane plane)
+    {
+        if (plane == null)
+        {
+            return false;
+        }
+
+        if (plane.alignment.IsHorizontal())
+        {
             return true;
         }
 
-        horizontalHit = default;
-        hitPlane = null;
-        return false;
-    }
+        if (plane.normal.sqrMagnitude < 0.0001f)
+        {
+            return false;
+        }
 
-    private static bool IsHorizontalPlane(ARPlane plane)
-    {
-        return plane.alignment == PlaneAlignment.HorizontalUp;
+        return Mathf.Abs(Vector3.Dot(plane.normal.normalized, Vector3.up)) >= horizontalPlaneNormalDotThreshold;
     }
 
     private bool IsUsableHorizontalPlane(ARPlane plane)
     {
-        if (plane == null || !IsHorizontalPlane(plane))
+        if (plane == null || plane.trackingState == TrackingState.None || !IsHorizontalPlane(plane))
         {
             return false;
         }
 
         Vector2 size = plane.size;
-        return size.x * size.y >= minimumHorizontalPlaneArea;
+        float area = size.x * size.y;
+        float minArea = Mathf.Min(minimumHorizontalPlaneArea, relaxedHorizontalPlaneArea);
+        return area >= minArea || Mathf.Max(size.x, size.y) >= 0.16f;
     }
 
     private bool IsEstimatedHorizontalHit(ARRaycastHit hit)
     {
         float upDot = Vector3.Dot(hit.pose.up, Vector3.up);
         return upDot >= estimatedSurfaceUpDotThreshold;
+    }
+
+    private static Pose CreateHorizontalPose(Vector3 position, Quaternion sourceRotation)
+    {
+        return new Pose(position, Quaternion.Euler(0f, sourceRotation.eulerAngles.y, 0f));
+    }
+
+    private float GetHorizontalHitScore(ARRaycastHit hit, float fallbackPenalty)
+    {
+        float score = hit.distance + fallbackPenalty;
+        TrackableType hitType = hit.hitType;
+        if ((hitType & TrackableType.PlaneWithinPolygon) != 0)
+        {
+            return score;
+        }
+
+        if ((hitType & TrackableType.PlaneWithinBounds) != 0)
+        {
+            return score + 0.12f;
+        }
+
+        if ((hitType & TrackableType.PlaneWithinInfinity) != 0)
+        {
+            return score + 0.25f;
+        }
+
+        return score + 0.5f;
+    }
+
+    private static bool IsPointNearPlaneBounds(ARPlane plane, Vector3 worldPoint, float padding)
+    {
+        Vector3 localPoint = plane.transform.InverseTransformPoint(worldPoint);
+        Vector2 planePoint = new Vector2(localPoint.x, localPoint.z);
+        Vector2 center = plane.centerInPlaneSpace;
+        Vector2 extents = plane.extents;
+        return Mathf.Abs(planePoint.x - center.x) <= extents.x + padding &&
+            Mathf.Abs(planePoint.y - center.y) <= extents.y + padding;
     }
 
     private void UpdatePlacementReticleForScreenPoint(Vector2 screenPoint)
@@ -1268,9 +1418,9 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        if (TryGetBestHorizontalSurfaceHit(screenPoint, out ARRaycastHit hit, out _))
+        if (TryGetBestHorizontalSurfaceHit(screenPoint, out Pose hitPose, out _))
         {
-            UpdatePlacementReticle(true, hit.pose);
+            UpdatePlacementReticle(true, hitPose);
             return;
         }
 
@@ -1428,7 +1578,8 @@ public class FurniturePlacementManager : MonoBehaviour
         {
             try
             {
-                ARAnchor attachedAnchor = arAnchorManager.AttachAnchor(plane, anchorPose);
+                Pose planeAnchorPose = ProjectPoseOntoPlane(anchorPose, plane);
+                ARAnchor attachedAnchor = arAnchorManager.AttachAnchor(plane, planeAnchorPose);
                 if (attachedAnchor != null)
                 {
                     placed.transform.SetParent(attachedAnchor.transform, true);
@@ -1453,6 +1604,63 @@ public class FurniturePlacementManager : MonoBehaviour
                 Debug.LogWarning("FurniturePlacementManager: no se pudo crear ARAnchor fallback. " + exception.Message);
             }
         }
+    }
+
+    private static Pose ProjectPoseOntoPlane(Pose pose, ARPlane plane)
+    {
+        if (plane == null || plane.normal.sqrMagnitude < 0.0001f)
+        {
+            return pose;
+        }
+
+        Vector3 normal = plane.normal.normalized;
+        float distanceFromPlane = Vector3.Dot(pose.position - plane.center, normal);
+        pose.position -= normal * distanceFromPlane;
+        return pose;
+    }
+
+    private void AlignFurnitureBottomToSurface(GameObject target, float surfaceY)
+    {
+        if (target == null || !TryGetRenderableBounds(target, out Bounds bounds))
+        {
+            return;
+        }
+
+        float desiredBottomY = surfaceY + furnitureGroundingOffset;
+        float deltaY = desiredBottomY - bounds.min.y;
+        if (Mathf.Abs(deltaY) <= 0.0005f)
+        {
+            return;
+        }
+
+        target.transform.position += Vector3.up * deltaY;
+    }
+
+    private static bool TryGetRenderableBounds(GameObject target, out Bounds bounds)
+    {
+        bounds = default;
+        Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+        bool hasBounds = false;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || renderer.gameObject.name == "SelectionVisual")
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     private static void RemoveAnchor(GameObject target)
@@ -1579,6 +1787,29 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         return Vector3.Distance(cam.transform.position, worldPosition) <= maxARPlacementDistance;
+    }
+
+    private void NormalizeARSensitivitySettings()
+    {
+        minimumHorizontalPlaneArea = Mathf.Min(minimumHorizontalPlaneArea, 0.025f);
+        relaxedHorizontalPlaneArea = Mathf.Clamp(relaxedHorizontalPlaneArea, 0.006f, minimumHorizontalPlaneArea);
+        horizontalPlaneNormalDotThreshold = Mathf.Clamp(horizontalPlaneNormalDotThreshold, 0.35f, 0.85f);
+        estimatedSurfaceUpDotThreshold = Mathf.Min(estimatedSurfaceUpDotThreshold, 0.55f);
+        furnitureGroundingOffset = Mathf.Clamp(furnitureGroundingOffset, -0.01f, 0.03f);
+    }
+
+    private void ConfigurePlaneDetectionMode()
+    {
+        if (arPlaneManager == null)
+        {
+            return;
+        }
+
+        PlaneDetectionMode requestedMode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
+        if (arPlaneManager.requestedDetectionMode != requestedMode)
+        {
+            arPlaneManager.requestedDetectionMode = requestedMode;
+        }
     }
 
     private Vector3 SnapPositionToGrid(Vector3 worldPosition)

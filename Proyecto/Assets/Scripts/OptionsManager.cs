@@ -1,18 +1,48 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.Events;
 
 public class OptionsManager : MonoBehaviour
 {
+    public const string PreviousSceneKey = "opt_previous_scene";
+
     [Header("Optional UI References")]
     [SerializeField]
-    private Slider sensitivitySlider;
+    private Slider sensitivitySlider = null;
 
     [SerializeField]
-    private Slider volumeSlider;
+    private Slider volumeSlider = null;
 
     [SerializeField]
-    private TMP_Dropdown qualityDropdown;
+    private TMP_Dropdown qualityDropdown = null;
+
+    [Header("Audio UI References")]
+    [SerializeField]
+    private Toggle musicToggle = null;
+
+    [SerializeField]
+    private Slider musicVolumeSlider = null;
+
+    [SerializeField]
+    private Toggle touchSoundsToggle = null;
+
+    [SerializeField]
+    private TextMeshProUGUI statusText = null;
+
+    [Header("Button UI References")]
+    [SerializeField]
+    private Button backgroundMusicButton = null;
+
+    [SerializeField]
+    private Button touchSoundsButton = null;
+
+    [SerializeField]
+    private Button deleteDesignsButton = null;
+
+    [SerializeField]
+    private Button backButton = null;
 
     [Header("Sensitivity Range")]
     [SerializeField]
@@ -30,8 +60,62 @@ public class OptionsManager : MonoBehaviour
 
     private void Awake()
     {
+        ResolveOptionsSceneControls();
+        WireOptionsSceneControls();
         ApplyAllSavedSettings();
         SyncUiFromSavedValues();
+    }
+
+    public void SetBackgroundMusicEnabled(bool enabled)
+    {
+        AudioFeedbackManager.EnsureInstance().SetMusicEnabled(enabled);
+        SyncAudioUiFromSavedValues();
+    }
+
+    public void SetBackgroundMusicVolume(float value)
+    {
+        AudioFeedbackManager.EnsureInstance().SetMusicVolume(value);
+        SyncAudioUiFromSavedValues();
+    }
+
+    public void SetTouchSoundsEnabled(bool enabled)
+    {
+        AudioFeedbackManager.EnsureInstance().SetTouchSoundsEnabled(enabled);
+        SyncAudioUiFromSavedValues();
+    }
+
+    public void ToggleBackgroundMusic()
+    {
+        AudioFeedbackManager audioManager = AudioFeedbackManager.EnsureInstance();
+        audioManager.SetMusicEnabled(!audioManager.IsMusicEnabled);
+        SyncAudioUiFromSavedValues();
+    }
+
+    public void CycleBackgroundMusicSetting()
+    {
+        AudioFeedbackManager audioManager = AudioFeedbackManager.EnsureInstance();
+        if (!audioManager.IsMusicEnabled)
+        {
+            audioManager.SetMusicVolume(0.55f);
+            audioManager.SetMusicEnabled(true);
+        }
+        else if (audioManager.MusicVolume < 0.7f)
+        {
+            audioManager.SetMusicVolume(0.85f);
+        }
+        else
+        {
+            audioManager.SetMusicEnabled(false);
+        }
+
+        SyncAudioUiFromSavedValues();
+    }
+
+    public void ToggleTouchSounds()
+    {
+        AudioFeedbackManager audioManager = AudioFeedbackManager.EnsureInstance();
+        audioManager.SetTouchSoundsEnabled(!audioManager.IsTouchSoundsEnabled);
+        SyncAudioUiFromSavedValues();
     }
 
     public void SetSensitivity(float value)
@@ -67,6 +151,23 @@ public class OptionsManager : MonoBehaviour
 
         ApplyAllSavedSettings();
         SyncUiFromSavedValues();
+    }
+
+    public void DeleteSavedDesigns()
+    {
+        int deletedCount = DesignSaveManager.DeleteAllSavedDesigns();
+        SetStatusText("Disenos borrados: " + deletedCount);
+    }
+
+    public void GoBack()
+    {
+        string previousScene = PlayerPrefs.GetString(PreviousSceneKey, "MainMenu");
+        if (string.IsNullOrEmpty(previousScene) || previousScene == SceneManager.GetActiveScene().name)
+        {
+            previousScene = "MainMenu";
+        }
+
+        SceneManager.LoadScene(previousScene);
     }
 
     public float GetSavedSensitivity()
@@ -122,6 +223,8 @@ public class OptionsManager : MonoBehaviour
 
     private void SyncUiFromSavedValues()
     {
+        SyncAudioUiFromSavedValues();
+
         float sensitivity = GetSavedSensitivity();
         float volume = GetSavedVolume();
         int quality = GetSavedQualityLevel();
@@ -147,5 +250,149 @@ public class OptionsManager : MonoBehaviour
             qualityDropdown.SetValueWithoutNotify(Mathf.Clamp(quality, 0, QualitySettings.names.Length - 1));
             qualityDropdown.RefreshShownValue();
         }
+    }
+
+    private void SyncAudioUiFromSavedValues()
+    {
+        AudioFeedbackManager audioManager = AudioFeedbackManager.EnsureInstance();
+
+        if (musicToggle != null)
+        {
+            musicToggle.SetIsOnWithoutNotify(audioManager.IsMusicEnabled);
+        }
+
+        if (musicVolumeSlider != null)
+        {
+            musicVolumeSlider.minValue = 0f;
+            musicVolumeSlider.maxValue = 1f;
+            musicVolumeSlider.SetValueWithoutNotify(audioManager.MusicVolume);
+        }
+
+        if (touchSoundsToggle != null)
+        {
+            touchSoundsToggle.SetIsOnWithoutNotify(audioManager.IsTouchSoundsEnabled);
+        }
+
+        SetButtonLabel(backgroundMusicButton, GetMusicButtonLabel(audioManager));
+        SetButtonLabel(
+            touchSoundsButton,
+            audioManager.IsTouchSoundsEnabled ? "Toques: Activados" : "Toques: Desactivados");
+        SetButtonLabel(deleteDesignsButton, "Borrar disenos guardados");
+        SetButtonLabel(backButton, "Volver");
+    }
+
+    private void SetStatusText(string message)
+    {
+        if (statusText == null)
+        {
+            Debug.Log(message);
+            return;
+        }
+
+        statusText.text = message;
+    }
+
+    private void ResolveOptionsSceneControls()
+    {
+        if (SceneManager.GetActiveScene().name != "Options")
+        {
+            return;
+        }
+
+        if (backgroundMusicButton == null)
+        {
+            backgroundMusicButton = FindButton("BtnStart");
+        }
+
+        if (touchSoundsButton == null)
+        {
+            touchSoundsButton = FindButton("BtnARStart");
+        }
+
+        if (deleteDesignsButton == null)
+        {
+            deleteDesignsButton = FindButton("BtnSaved");
+        }
+
+        if (backButton == null)
+        {
+            backButton = FindButton("BtnOptions");
+        }
+
+        if (statusText == null)
+        {
+            GameObject statusObject = GameObject.Find("SubtitleText");
+            if (statusObject != null)
+            {
+                statusText = statusObject.GetComponent<TextMeshProUGUI>();
+            }
+        }
+
+        SetText("TitleText", "Opciones");
+        SetText("SubtitleText", "Audio y datos guardados");
+    }
+
+    private void WireOptionsSceneControls()
+    {
+        WireButton(backgroundMusicButton, CycleBackgroundMusicSetting);
+        WireButton(touchSoundsButton, ToggleTouchSounds);
+        WireButton(deleteDesignsButton, DeleteSavedDesigns);
+        WireButton(backButton, GoBack);
+    }
+
+    private static Button FindButton(string buttonName)
+    {
+        GameObject buttonObject = GameObject.Find(buttonName);
+        return buttonObject == null ? null : buttonObject.GetComponent<Button>();
+    }
+
+    private static void WireButton(Button button, UnityAction action)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(action);
+    }
+
+    private static void SetButtonLabel(Button button, string label)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI text = button.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (text != null)
+        {
+            text.text = label;
+        }
+    }
+
+    private static void SetText(string objectName, string value)
+    {
+        GameObject textObject = GameObject.Find(objectName);
+        if (textObject == null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+        if (text != null)
+        {
+            text.text = value;
+        }
+    }
+
+    private static string GetMusicButtonLabel(AudioFeedbackManager audioManager)
+    {
+        if (!audioManager.IsMusicEnabled)
+        {
+            return "Musica: Desactivada";
+        }
+
+        return audioManager.MusicVolume < 0.7f ? "Musica: Volumen medio" : "Musica: Volumen alto";
     }
 }

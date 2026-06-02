@@ -40,6 +40,9 @@ public class UIManage : MonoBehaviour
     public void OpenOptions()
     {
         Debug.Log("Abrir opciones");
+        PlayerPrefs.SetString(OptionsManager.PreviousSceneKey, SceneManager.GetActiveScene().name);
+        PlayerPrefs.Save();
+        SceneManager.LoadScene("Options");
     }
 
     private void EnsureARStartButton()

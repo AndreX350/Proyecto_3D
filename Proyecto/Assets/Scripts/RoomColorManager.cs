@@ -44,6 +44,15 @@ public class RoomColorManager : MonoBehaviour
     private float selectedWallBoostMultiplier = 1.45f;
 
     [SerializeField]
+    private float minimumVisibleWallOverlayWidth = 0.5f;
+
+    [SerializeField]
+    private float minimumVisibleWallOverlayHeight = 0.42f;
+
+    [SerializeField]
+    private float virtualWallFallbackDistance = 2.2f;
+
+    [SerializeField]
     private bool requireExplicitApplyInAR = true;
 
     [SerializeField]
@@ -61,9 +70,15 @@ public class RoomColorManager : MonoBehaviour
     private readonly Dictionary<ARPlane, LineRenderer> arWallOutlines = new Dictionary<ARPlane, LineRenderer>();
     private readonly Dictionary<ARPlane, Color> arWallAppliedColors = new Dictionary<ARPlane, Color>();
     private readonly List<ARRaycastHit> arHits = new List<ARRaycastHit>();
+    private const string WallOverlayName = "ARWallColorOverlay";
     private ARRaycastManager arRaycastManager;
     private ARPlaneManager arPlaneManager;
     private ARPlane selectedARWall;
+    private Renderer selectedVirtualWallRenderer;
+    private Renderer virtualWallRenderer;
+    private LineRenderer virtualWallOutline;
+    private bool hasVirtualWallColor;
+    private Color virtualWallColor = Color.white;
     private float selectedWallBoostUntil;
     private float verticalDetectionReadyTime;
     private Color pendingWallColor = Color.white;
@@ -107,7 +122,7 @@ public class RoomColorManager : MonoBehaviour
         ResolveARManagers();
         AddDetectedARWalls();
 
-        if (ShouldRequireExplicitApply() && selectedARWall == null)
+        if (ShouldRequireExplicitApply() && selectedARWall == null && selectedVirtualWallRenderer == null)
         {
             pendingWallColor = color;
             hasPendingWallColor = true;
@@ -118,6 +133,16 @@ public class RoomColorManager : MonoBehaviour
         currentWallColor = color;
         hasCurrentWallColor = true;
         hasPendingWallColor = false;
+
+        if (selectedVirtualWallRenderer != null)
+        {
+            virtualWallColor = color;
+            hasVirtualWallColor = true;
+            ApplyColorToRenderer(selectedVirtualWallRenderer, color, arWallOverlayAlpha);
+            UpdateSelectedWallVisuals();
+            ARDiagnostics.Report("Color aplicado a pared virtual seleccionada.");
+            return true;
+        }
 
         if (selectedARWall != null)
         {
@@ -175,11 +200,56 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
+    public void ClearWallColor()
+    {
+        currentWallColor = Color.white;
+        hasCurrentWallColor = false;
+        pendingWallColor = Color.white;
+        hasPendingWallColor = false;
+        arWallAppliedColors.Clear();
+        hasVirtualWallColor = false;
+        virtualWallColor = Color.white;
+        ClearSelectedWall();
+
+        if (wallRenderers.Count == 0)
+        {
+            FindWallsInScene();
+        }
+
+        for (int i = wallRenderers.Count - 1; i >= 0; i--)
+        {
+            Renderer wallRenderer = wallRenderers[i];
+            if (wallRenderer == null)
+            {
+                wallRenderers.RemoveAt(i);
+                continue;
+            }
+
+            bool isARWall = IsARWallRenderer(wallRenderer);
+            if (isARWall)
+            {
+                ApplyColorToRenderer(wallRenderer, detectedWallTint, detectedWallOverlayAlpha);
+            }
+            else
+            {
+                ApplyColorToRenderer(wallRenderer, Color.white);
+            }
+        }
+
+        UpdateSelectedWallVisuals();
+        ARDiagnostics.Report("Color de paredes borrado.");
+    }
+
     public string GetSelectedWallShortName()
     {
         if (selectedARWall != null)
         {
             return "Pared AR " + GetWallIndex(selectedARWall) + " seleccionada";
+        }
+
+        if (selectedVirtualWallRenderer != null)
+        {
+            return "Pared virtual seleccionada";
         }
 
         return "Sin pared seleccionada";
@@ -189,7 +259,7 @@ public class RoomColorManager : MonoBehaviour
 
     public bool ShouldPrioritizeWallSelection() => hasPendingWallColor;
 
-    public bool HasAppliedWallColor() => hasCurrentWallColor || arWallAppliedColors.Count > 0;
+    public bool HasAppliedWallColor() => hasCurrentWallColor || arWallAppliedColors.Count > 0 || hasVirtualWallColor;
 
     public string GetWallStatusText()
     {
@@ -243,6 +313,12 @@ public class RoomColorManager : MonoBehaviour
 
         if (!TrySelectWallImmediate(screenPoint, out ARPlane plane))
         {
+            if (TrySelectVirtualWallAtScreenPoint(screenPoint, out Renderer virtualRenderer))
+            {
+                SelectVirtualWall(virtualRenderer);
+                return true;
+            }
+
             TryScheduleWallSelectionRetry(screenPoint);
             ARDiagnostics.Report("Raycast AR a pared sin plano vertical util.");
             return false;
@@ -265,9 +341,129 @@ public class RoomColorManager : MonoBehaviour
         return true;
     }
 
+    private bool TrySelectVirtualWallAtScreenPoint(Vector2 screenPoint, out Renderer renderer)
+    {
+        renderer = null;
+        Camera camera = Camera.main;
+        if (camera == null)
+        {
+            return false;
+        }
+
+        if (virtualWallRenderer != null &&
+            TryGetRendererScreenRect(camera, virtualWallRenderer, out Rect existingRect))
+        {
+            Rect paddedRect = existingRect;
+            paddedRect.xMin -= wallSelectionScreenPadding;
+            paddedRect.xMax += wallSelectionScreenPadding;
+            paddedRect.yMin -= wallSelectionScreenPadding;
+            paddedRect.yMax += wallSelectionScreenPadding;
+            if (paddedRect.Contains(screenPoint))
+            {
+                renderer = virtualWallRenderer;
+                return true;
+            }
+        }
+
+        if (TryCreateVirtualWallFromFeaturePoint(screenPoint, camera, out renderer))
+        {
+            return true;
+        }
+
+        renderer = CreateOrMoveVirtualWallFromCameraRay(screenPoint, camera);
+        return renderer != null;
+    }
+
+    private bool TryCreateVirtualWallFromFeaturePoint(Vector2 screenPoint, Camera camera, out Renderer renderer)
+    {
+        renderer = null;
+        if (arRaycastManager == null)
+        {
+            return false;
+        }
+
+        arHits.Clear();
+        if (!arRaycastManager.Raycast(screenPoint, arHits, TrackableType.FeaturePoint))
+        {
+            return false;
+        }
+
+        ARRaycastHit bestHit = arHits[0];
+        for (int i = 1; i < arHits.Count; i++)
+        {
+            if (arHits[i].distance < bestHit.distance)
+            {
+                bestHit = arHits[i];
+            }
+        }
+
+        renderer = CreateOrMoveVirtualWall(bestHit.pose.position, camera);
+        return renderer != null;
+    }
+
+    private Renderer CreateOrMoveVirtualWallFromCameraRay(Vector2 screenPoint, Camera camera)
+    {
+        Ray ray = camera.ScreenPointToRay(screenPoint);
+        float distance = Mathf.Clamp(virtualWallFallbackDistance, 0.8f, maxWallSelectionDistance);
+        return CreateOrMoveVirtualWall(ray.GetPoint(distance), camera);
+    }
+
+    private Renderer CreateOrMoveVirtualWall(Vector3 position, Camera camera)
+    {
+        if (camera == null)
+        {
+            return null;
+        }
+
+        if (virtualWallRenderer == null)
+        {
+            GameObject wallObject = new GameObject(WallOverlayName);
+            MeshFilter meshFilter = wallObject.AddComponent<MeshFilter>();
+            virtualWallRenderer = wallObject.AddComponent<MeshRenderer>();
+            virtualWallRenderer.receiveShadows = false;
+            virtualWallRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            virtualWallRenderer.sharedMaterial = CreateARWallMaterial(detectedWallTint, detectedWallOverlayAlpha);
+            virtualWallOutline = wallObject.AddComponent<LineRenderer>();
+            ConfigureWallOutline(virtualWallOutline);
+            UpdateVirtualWallMesh(meshFilter, virtualWallOutline);
+        }
+
+        Transform wallTransform = virtualWallRenderer.transform;
+        Vector3 normalTowardCamera = camera.transform.position - position;
+        normalTowardCamera.y = 0f;
+        if (normalTowardCamera.sqrMagnitude < 0.0001f)
+        {
+            normalTowardCamera = -camera.transform.forward;
+            normalTowardCamera.y = 0f;
+        }
+
+        normalTowardCamera.Normalize();
+        wallTransform.SetPositionAndRotation(
+            position,
+            Quaternion.LookRotation(normalTowardCamera, Vector3.up));
+
+        virtualWallRenderer.enabled = true;
+        if (virtualWallOutline != null)
+        {
+            virtualWallOutline.enabled = true;
+        }
+
+        if (!wallRenderers.Contains(virtualWallRenderer))
+        {
+            wallRenderers.Add(virtualWallRenderer);
+        }
+
+        ApplyColorToRenderer(
+            virtualWallRenderer,
+            hasVirtualWallColor ? virtualWallColor : detectedWallTint,
+            hasVirtualWallColor ? arWallOverlayAlpha : detectedWallOverlayAlpha);
+        return virtualWallRenderer;
+    }
+
     private void SelectARWall(ARPlane plane)
     {
         selectedARWall = plane;
+        selectedVirtualWallRenderer = null;
         Renderer renderer = EnsureARWallOverlay(plane);
         if (renderer != null && !wallRenderers.Contains(renderer))
         {
@@ -289,9 +485,37 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
+    private void SelectVirtualWall(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        selectedARWall = null;
+        selectedVirtualWallRenderer = renderer;
+        selectedWallBoostUntil = Time.unscaledTime + selectedWallBoostDuration;
+        if (!wallRenderers.Contains(renderer))
+        {
+            wallRenderers.Add(renderer);
+        }
+
+        UpdateSelectedWallVisuals();
+        ARDiagnostics.Report("Pared virtual seleccionada para color.");
+
+        if (autoApplyPendingColorOnWallSelect && hasPendingWallColor)
+        {
+            Color queuedColor = pendingWallColor;
+            hasPendingWallColor = false;
+            ApplyWallColor(queuedColor);
+            ARDiagnostics.Report("Color pendiente aplicado automaticamente a pared virtual.");
+        }
+    }
+
     public void ClearSelectedWall()
     {
         selectedARWall = null;
+        selectedVirtualWallRenderer = null;
         selectedWallBoostUntil = 0f;
         UpdateSelectedWallVisuals();
     }
@@ -371,6 +595,15 @@ public class RoomColorManager : MonoBehaviour
         if (arPlaneManager == null)
         {
             arPlaneManager = FindObjectOfType<ARPlaneManager>();
+        }
+
+        if (arPlaneManager != null)
+        {
+            PlaneDetectionMode requestedMode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
+            if (arPlaneManager.requestedDetectionMode != requestedMode)
+            {
+                arPlaneManager.requestedDetectionMode = requestedMode;
+            }
         }
     }
 
@@ -462,7 +695,7 @@ public class RoomColorManager : MonoBehaviour
             Vector3 worldPoint = ray.GetPoint(distance);
             Vector3 localPoint = plane.transform.InverseTransformPoint(worldPoint);
             Vector2 planePoint = new Vector2(localPoint.x, localPoint.z);
-            if (!IsPointInsidePlane(plane, planePoint))
+            if (!IsPointInsidePlane(plane, planePoint) && !IsPointNearPlaneBounds(plane, planePoint, 0.22f))
             {
                 continue;
             }
@@ -563,11 +796,13 @@ public class RoomColorManager : MonoBehaviour
 
         Vector2 size = plane.size;
         float wallMinSize = GetEffectiveMinimumWallSize(false);
-        if (size.x < wallMinSize || size.y < wallMinSize)
+        float visualMinWidth = Mathf.Max(wallMinSize, minimumVisibleWallOverlayWidth);
+        float visualMinHeight = Mathf.Max(wallMinSize, minimumVisibleWallOverlayHeight);
+        if (size.x < visualMinWidth || size.y < visualMinHeight)
         {
             size = new Vector2(
-                Mathf.Max(size.x, wallMinSize),
-                Mathf.Max(size.y, wallMinSize));
+                Mathf.Max(size.x, visualMinWidth),
+                Mathf.Max(size.y, visualMinHeight));
         }
 
         Vector2 center = plane.centerInPlaneSpace;
@@ -637,6 +872,14 @@ public class RoomColorManager : MonoBehaviour
         Vector2 extents = plane.extents;
         return Mathf.Abs(planePoint.x - center.x) <= extents.x &&
             Mathf.Abs(planePoint.y - center.y) <= extents.y;
+    }
+
+    private static bool IsPointNearPlaneBounds(ARPlane plane, Vector2 planePoint, float padding)
+    {
+        Vector2 center = plane.centerInPlaneSpace;
+        Vector2 extents = plane.extents;
+        return Mathf.Abs(planePoint.x - center.x) <= extents.x + padding &&
+            Mathf.Abs(planePoint.y - center.y) <= extents.y + padding;
     }
 
     private static int WindingNumber(Vector2 point, Unity.Collections.NativeArray<Vector2> polygon)
@@ -815,6 +1058,52 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
+    private void UpdateVirtualWallMesh(MeshFilter meshFilter, LineRenderer outline)
+    {
+        if (meshFilter == null)
+        {
+            return;
+        }
+
+        float halfWidth = Mathf.Max(0.25f, minimumVisibleWallOverlayWidth * 0.5f);
+        float halfHeight = Mathf.Max(0.2f, minimumVisibleWallOverlayHeight * 0.5f);
+        Mesh mesh = meshFilter.sharedMesh;
+        if (mesh == null)
+        {
+            mesh = new Mesh();
+            mesh.name = "VirtualWallOverlayMesh";
+            meshFilter.sharedMesh = mesh;
+        }
+
+        mesh.Clear();
+        mesh.vertices = new[]
+        {
+            new Vector3(-halfWidth, -halfHeight, 0f),
+            new Vector3(halfWidth, -halfHeight, 0f),
+            new Vector3(-halfWidth, halfHeight, 0f),
+            new Vector3(halfWidth, halfHeight, 0f)
+        };
+        mesh.uv = new[]
+        {
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f)
+        };
+        mesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+
+        if (outline != null)
+        {
+            outline.positionCount = 4;
+            outline.SetPosition(0, mesh.vertices[0]);
+            outline.SetPosition(1, mesh.vertices[1]);
+            outline.SetPosition(2, mesh.vertices[3]);
+            outline.SetPosition(3, mesh.vertices[2]);
+        }
+    }
+
     private void ApplyColorToRenderer(Renderer wallRenderer, Color color)
     {
         if (wallRenderer == null)
@@ -822,7 +1111,7 @@ public class RoomColorManager : MonoBehaviour
             return;
         }
 
-        bool isARWall = wallRenderer.GetComponentInParent<ARPlane>() != null;
+        bool isARWall = IsARWallRenderer(wallRenderer);
         float alpha = isARWall ? arWallOverlayAlpha : color.a;
         ApplyColorToRenderer(wallRenderer, color, alpha);
     }
@@ -834,7 +1123,7 @@ public class RoomColorManager : MonoBehaviour
             return;
         }
 
-        bool isARWall = wallRenderer.GetComponentInParent<ARPlane>() != null;
+        bool isARWall = IsARWallRenderer(wallRenderer);
         Color appliedColor = isARWall ? new Color(color.r, color.g, color.b, alpha) : color;
         Material wallMaterial = wallRenderer.material;
         ConfigureMaterialForColor(wallMaterial, appliedColor, isARWall);
@@ -842,7 +1131,7 @@ public class RoomColorManager : MonoBehaviour
 
     private void UpdateSelectedWallVisuals()
     {
-        if (arWallOverlays.Count == 0)
+        if (arWallOverlays.Count == 0 && virtualWallRenderer == null)
         {
             return;
         }
@@ -898,6 +1187,48 @@ public class RoomColorManager : MonoBehaviour
                 {
                     ConfigureMaterialForColor(outline.sharedMaterial, tinted, true);
                 }
+            }
+        }
+
+        UpdateVirtualWallVisual();
+    }
+
+    private void UpdateVirtualWallVisual()
+    {
+        if (virtualWallRenderer == null)
+        {
+            return;
+        }
+
+        bool isSelected = selectedVirtualWallRenderer == virtualWallRenderer;
+        Color baseColor = hasVirtualWallColor ? virtualWallColor : detectedWallTint;
+        float alpha = hasVirtualWallColor ? arWallOverlayAlpha : detectedWallOverlayAlpha;
+        if (isSelected)
+        {
+            Color selectedColor = hasPendingWallColor ? pendingWallColor : baseColor;
+            alpha = selectedWallOverlayAlpha;
+            baseColor = Time.unscaledTime <= selectedWallBoostUntil
+                ? new Color(
+                    Mathf.Clamp01(selectedColor.r * selectedWallBoostMultiplier),
+                    Mathf.Clamp01(selectedColor.g * selectedWallBoostMultiplier),
+                    Mathf.Clamp01(selectedColor.b * selectedWallBoostMultiplier),
+                    alpha)
+                : selectedColor;
+        }
+
+        Color color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
+        ConfigureMaterialForColor(virtualWallRenderer.material, color, true);
+
+        if (virtualWallOutline != null)
+        {
+            virtualWallOutline.enabled = true;
+            virtualWallOutline.startWidth = isSelected ? 0.018f : 0.008f;
+            virtualWallOutline.endWidth = virtualWallOutline.startWidth;
+            virtualWallOutline.startColor = color;
+            virtualWallOutline.endColor = color;
+            if (virtualWallOutline.sharedMaterial != null)
+            {
+                ConfigureMaterialForColor(virtualWallOutline.sharedMaterial, color, true);
             }
         }
     }
@@ -958,6 +1289,61 @@ public class RoomColorManager : MonoBehaviour
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         material.SetInt("_ZWrite", 0);
         material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+    }
+
+    private static bool IsARWallRenderer(Renderer renderer)
+    {
+        return renderer != null &&
+            (renderer.GetComponentInParent<ARPlane>() != null ||
+            renderer.gameObject.name == WallOverlayName);
+    }
+
+    private static bool TryGetRendererScreenRect(Camera camera, Renderer renderer, out Rect screenRect)
+    {
+        screenRect = default;
+        if (camera == null || renderer == null)
+        {
+            return false;
+        }
+
+        Bounds bounds = renderer.bounds;
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+        Vector3[] corners =
+        {
+            new Vector3(min.x, min.y, min.z),
+            new Vector3(min.x, min.y, max.z),
+            new Vector3(min.x, max.y, min.z),
+            new Vector3(min.x, max.y, max.z),
+            new Vector3(max.x, min.y, min.z),
+            new Vector3(max.x, min.y, max.z),
+            new Vector3(max.x, max.y, min.z),
+            new Vector3(max.x, max.y, max.z)
+        };
+
+        bool hasVisibleCorner = false;
+        Vector2 rectMin = new Vector2(float.MaxValue, float.MaxValue);
+        Vector2 rectMax = new Vector2(float.MinValue, float.MinValue);
+        for (int i = 0; i < corners.Length; i++)
+        {
+            Vector3 screen = camera.WorldToScreenPoint(corners[i]);
+            if (screen.z <= 0f)
+            {
+                continue;
+            }
+
+            hasVisibleCorner = true;
+            rectMin = Vector2.Min(rectMin, screen);
+            rectMax = Vector2.Max(rectMax, screen);
+        }
+
+        if (!hasVisibleCorner)
+        {
+            return false;
+        }
+
+        screenRect = Rect.MinMaxRect(rectMin.x, rectMin.y, rectMax.x, rectMax.y);
+        return true;
     }
 
     private static void SetFloatIfMaterialHasProperty(Material material, string propertyName, float value)
@@ -1036,10 +1422,10 @@ public class RoomColorManager : MonoBehaviour
 
     private float GetEffectiveMinimumWallSize(bool relaxed)
     {
-        float strict = Mathf.Max(0.03f, minimumARWallSize);
+        float strict = Mathf.Max(0.025f, Mathf.Min(minimumARWallSize, 0.08f));
         if (relaxed)
         {
-            return Mathf.Max(0.03f, Mathf.Min(strict, relaxedMinimumARWallSize));
+            return Mathf.Max(0.02f, Mathf.Min(strict, relaxedMinimumARWallSize));
         }
 
         if (HasSeenVerticalWallsRecently())
@@ -1047,7 +1433,7 @@ public class RoomColorManager : MonoBehaviour
             return strict;
         }
 
-        return Mathf.Max(0.03f, Mathf.Min(strict, relaxedMinimumARWallSize));
+        return Mathf.Max(0.02f, Mathf.Min(strict, relaxedMinimumARWallSize));
     }
 
     private bool HasSeenVerticalWallsRecently()
@@ -1067,7 +1453,7 @@ public class RoomColorManager : MonoBehaviour
             return true;
         }
 
-        if (plane.alignment != PlaneAlignment.NotAxisAligned)
+        if (plane.alignment.IsHorizontal())
         {
             return false;
         }
@@ -1083,7 +1469,7 @@ public class RoomColorManager : MonoBehaviour
         }
 
         float upDot = Mathf.Abs(Vector3.Dot(normal.normalized, Vector3.up));
-        return upDot <= 0.3f;
+        return upDot <= 0.55f;
     }
 
     private ARPlane TryFindNearestVerticalPlane(Vector3 worldPoint, bool relaxedSize)

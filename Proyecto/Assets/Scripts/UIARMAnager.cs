@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UnityEngine.SceneManagement;
+using System.Collections;
 using System.Collections.Generic;
 
 public class UIARMAnager : MonoBehaviour
@@ -27,6 +28,9 @@ public class UIARMAnager : MonoBehaviour
     private Transform bottomButtonsContainer;
     private bool isPrimaryManager = true;
     private TextMeshProUGUI wallStatusText;
+    private GameObject toastPanel;
+    private TextMeshProUGUI toastText;
+    private Coroutine toastRoutine;
 
     private readonly Color[] wallColors =
     {
@@ -113,6 +117,13 @@ public class UIARMAnager : MonoBehaviour
         {
             placementManager.ClearPlacedFurniture();
         }
+
+        if (roomColorManager != null)
+        {
+            roomColorManager.ClearWallColor();
+        }
+
+        ShowToast("Cuarto limpiado");
         ClosePanels();
     }
 
@@ -144,6 +155,7 @@ public class UIARMAnager : MonoBehaviour
 
         placementManager.RefreshPlacedFurnitureList();
         designSaveManager.SaveDesign(placementManager.PlacedFurniture, roomColorManager);
+        ShowToast("Dise\u00f1o guardado");
         ClosePanels();
     }
 
@@ -188,7 +200,10 @@ public class UIARMAnager : MonoBehaviour
             return;
         }
 
-        placementManager.DeleteSelectedFurniture();
+        if (placementManager.DeleteSelectedFurniture())
+        {
+            ShowToast("Mueble borrado");
+        }
         ClosePanels();
     }
 
@@ -829,5 +844,97 @@ public class UIARMAnager : MonoBehaviour
         }
 
         wallStatusText.text = roomColorManager.GetWallStatusText();
+    }
+
+    private void ShowToast(string message)
+    {
+        string sceneName = SceneManager.GetActiveScene().name;
+        if (sceneName != "RoomDemo" && sceneName != "ARScene")
+        {
+            return;
+        }
+
+        EnsureToast();
+        if (toastPanel == null || toastText == null)
+        {
+            Debug.Log(message);
+            return;
+        }
+
+        toastText.text = message;
+        toastPanel.SetActive(true);
+
+        if (toastRoutine != null)
+        {
+            StopCoroutine(toastRoutine);
+        }
+
+        toastRoutine = StartCoroutine(HideToastAfterDelay(2.2f));
+    }
+
+    private IEnumerator HideToastAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+
+        if (toastPanel != null)
+        {
+            toastPanel.SetActive(false);
+        }
+
+        toastRoutine = null;
+    }
+
+    private void EnsureToast()
+    {
+        if (toastPanel != null && toastText != null)
+        {
+            return;
+        }
+
+        Canvas canvas = FindObjectOfType<Canvas>();
+        if (canvas == null)
+        {
+            return;
+        }
+
+        toastPanel = new GameObject(
+            "ToastMessage",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        toastPanel.transform.SetParent(canvas.transform, false);
+        toastPanel.transform.SetAsLastSibling();
+
+        RectTransform panelRect = toastPanel.GetComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.5f, 1f);
+        panelRect.anchorMax = new Vector2(0.5f, 1f);
+        panelRect.pivot = new Vector2(0.5f, 1f);
+        panelRect.anchoredPosition = new Vector2(0f, -160f);
+        panelRect.sizeDelta = new Vector2(460f, 72f);
+
+        Image panelImage = toastPanel.GetComponent<Image>();
+        panelImage.color = new Color(0.08f, 0.09f, 0.10f, 0.88f);
+        panelImage.raycastTarget = false;
+
+        GameObject textObject = new GameObject(
+            "ToastText",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(toastPanel.transform, false);
+
+        RectTransform textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(18f, 8f);
+        textRect.offsetMax = new Vector2(-18f, -8f);
+
+        toastText = textObject.GetComponent<TextMeshProUGUI>();
+        toastText.color = Color.white;
+        toastText.fontSize = 26f;
+        toastText.alignment = TextAlignmentOptions.Center;
+        toastText.enableWordWrapping = true;
+
+        toastPanel.SetActive(false);
     }
 }

@@ -140,6 +140,22 @@ public class DesignSaveManager : MonoBehaviour
         return true;
     }
 
+    public static int DeleteAllSavedDesigns()
+    {
+        string[] files = GetSavedDesignFiles();
+        int deletedCount = 0;
+
+        for (int i = 0; i < files.Length; i++)
+        {
+            if (DeleteDesign(files[i]))
+            {
+                deletedCount++;
+            }
+        }
+
+        return deletedCount;
+    }
+
     public static void TryLoadPendingRoomDemoDesign(
         FurnitureCatalog catalog,
         FurniturePlacementManager placementManager,
