@@ -1,0 +1,65 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1451696136340899083
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5169809864350202865}
+  - component: {fileID: 8597941106413540957}
+  m_Layer: 0
+  m_Name: RoomColorManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5169809864350202865
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1451696136340899083}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 149.31818, y: 223.63634, z: 14.489014}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &8597941106413540957
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1451696136340899083}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8f4c4e0df63949f4899f2e3e8a36c1a1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  wallRenderers: []
+  arWallOverlayAlpha: 0.45
+  detectedWallOverlayAlpha: 0.35
+  selectedWallOverlayAlpha: 0.68
+  detectedWallTint: {r: 0.15, g: 0.72, b: 1, a: 1}
+  selectedWallTint: {r: 1, g: 0.35, b: 0.9, a: 1}
+  minimumARWallSize: 0.12
+  relaxedMinimumARWallSize: 0.06
+  wallSelectionScreenPadding: 150
+  maxWallSelectionDistance: 8.5
+  selectedWallBoostDuration: 0.8
+  selectedWallBoostMultiplier: 1.45
+  minimumVisibleWallOverlayWidth: 0.5
+  minimumVisibleWallOverlayHeight: 0.42
+  virtualWallFallbackDistance: 2.2
+  requireExplicitApplyInAR: 1
+  autoApplyPendingColorOnWallSelect: 1
+  wallSelectionRetryAttempts: 6
+  wallSelectionRetryInterval: 0.22

@@ -1294,6 +1294,7 @@ GameObject:
   - component: {fileID: 298747082}
   - component: {fileID: 298747081}
   - component: {fileID: 298747080}
+  - component: {fileID: 298747085}
   m_Layer: 0
   m_Name: XR Origin
   m_TagString: Untagged
@@ -1339,7 +1340,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e1760703bbd54c04488a8d10600262ab, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_PlanePrefab: {fileID: 8258681095012561029, guid: c63d835e6e6c7334691a87baff64d22b, type: 3}
+  m_PlanePrefab: {fileID: 8258681095012561029, guid: c63d835e6e6c7334691a87baff64d22b,
+    type: 3}
   m_DetectionMode: -1
 --- !u!114 &298747083
 MonoBehaviour:
@@ -1356,7 +1358,7 @@ MonoBehaviour:
   m_Camera: {fileID: 1484649141}
   m_OriginBaseGameObject: {fileID: 298747079}
   m_CameraFloorOffsetObject: {fileID: 1444875913}
-  m_RequestedTrackingOriginMode: 0
+  m_RequestedTrackingOriginMode: 1
   m_CameraYOffset: 1.1176
 --- !u!4 &298747084
 Transform:
@@ -1374,6 +1376,22 @@ Transform:
   - {fileID: 1444875914}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &298747085
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 298747079}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b8d324f7a6d74f9f9f0f8e89e88f6a1d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  hidePlaneVisuals: 1
+  showVerticalPlaneHints: 1
+  detectHorizontalPlanes: 1
+  detectVerticalPlanes: 1
 --- !u!1 &311623811
 GameObject:
   m_ObjectHideFlags: 0
@@ -3569,6 +3587,74 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 736640190}
   m_CullTransparentMesh: 1
+--- !u!1001 &750944596
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 1451696136340899083, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_Name
+      value: RoomColorManager
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 149.31818
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 223.63634
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 14.489014
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5169809864350202865, guid: 0838322d2eb0e86448d94523462b17dc,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 0838322d2eb0e86448d94523462b17dc, type: 3}
 --- !u!1 &762708945
 GameObject:
   m_ObjectHideFlags: 0
@@ -4844,7 +4930,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   hideDemoRoomObjects: 1
-  defaultPlanePrefab: {fileID: 8258681095012561029, guid: c63d835e6e6c7334691a87baff64d22b, type: 3}
+  defaultPlanePrefab: {fileID: 8258681095012561029, guid: c63d835e6e6c7334691a87baff64d22b,
+    type: 3}
 --- !u!4 &960592836
 Transform:
   m_ObjectHideFlags: 0
@@ -5985,7 +6072,10 @@ MonoBehaviour:
   anchorARPlacedFurniture: 1
   showPlacementReticle: 1
   minimumHorizontalPlaneArea: 0.06
+  relaxedHorizontalPlaneArea: 0.015
+  horizontalPlaneNormalDotThreshold: 0.5
   estimatedSurfaceUpDotThreshold: 0.65
+  furnitureGroundingOffset: 0.002
   useGridSnapForAR: 1
   arGridSize: 0.05
   snapARFurnitureWhileDragging: 0
@@ -6000,7 +6090,11 @@ MonoBehaviour:
   floorLayerMask:
     serializedVersion: 2
     m_Bits: 4294967295
+  roomObstacleLayerMask:
+    serializedVersion: 2
+    m_Bits: 8
   moveRayDistance: 100
+  roomFloorNormalDotThreshold: 0.55
   rotateStepDegrees: 45
   scaleStep: 0.1
   minUniformScale: 0.4
@@ -9546,3 +9640,4 @@ SceneRoots:
   - {fileID: 1210298285}
   - {fileID: 960592836}
   - {fileID: 1300780929}
+  - {fileID: 750944596}

@@ -89,7 +89,10 @@ public class RoomColorManager : MonoBehaviour
     private const TrackableType WallRaycastTrackables =
         TrackableType.PlaneWithinPolygon |
         TrackableType.PlaneWithinBounds |
-        TrackableType.PlaneWithinInfinity;
+        TrackableType.PlaneWithinInfinity |
+        TrackableType.PlaneEstimated;
+
+    private const float WallSelectionBoundsPadding = 0.24f;
 
     private static readonly HashSet<string> AllowedWallNames = new HashSet<string>
     {
@@ -179,6 +182,18 @@ public class RoomColorManager : MonoBehaviour
         {
             pendingWallColor = color;
             hasPendingWallColor = true;
+            if (autoApplyPendingColorOnWallSelect)
+            {
+                if (HasSelectedWall())
+                {
+                    ApplyPendingWallColor();
+                    return;
+                }
+
+                ARDiagnostics.Report("Color en espera. Toca una pared para aplicarlo.");
+                return;
+            }
+
             ARDiagnostics.Report("Color en espera. Toca APLICAR para pintar la pared.");
             return;
         }
@@ -261,6 +276,8 @@ public class RoomColorManager : MonoBehaviour
 
     public bool HasAppliedWallColor() => hasCurrentWallColor || arWallAppliedColors.Count > 0 || hasVirtualWallColor;
 
+    private bool HasSelectedWall() => selectedARWall != null || selectedVirtualWallRenderer != null;
+
     public string GetWallStatusText()
     {
         string selectedLabel = GetSelectedWallShortName();
@@ -331,14 +348,9 @@ public class RoomColorManager : MonoBehaviour
     private bool TrySelectWallImmediate(Vector2 screenPoint, out ARPlane plane)
     {
         plane = null;
-        if (!TryGetVerticalWallHit(screenPoint, WallRaycastTrackables, out plane))
-        {
-            return TryGetVerticalWallHit(screenPoint, TrackableType.PlaneEstimated, out plane) ||
-                TryRaycastTrackedVerticalWall(screenPoint, out plane) ||
-                TryGetClosestVerticalWallAtScreenPoint(screenPoint, out plane);
-        }
-
-        return true;
+        return TryGetVerticalWallHit(screenPoint, out plane) ||
+            TryRaycastTrackedVerticalWall(screenPoint, out plane) ||
+            TryGetClosestVerticalWallAtScreenPoint(screenPoint, out plane);
     }
 
     private bool TrySelectVirtualWallAtScreenPoint(Vector2 screenPoint, out Renderer renderer)
@@ -607,12 +619,17 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
-    private bool TryGetVerticalWallHit(Vector2 screenPoint, TrackableType trackableTypes, out ARPlane wallPlane)
+    private bool TryGetVerticalWallHit(Vector2 screenPoint, out ARPlane wallPlane)
     {
         wallPlane = null;
+        if (arRaycastManager == null || arPlaneManager == null)
+        {
+            return false;
+        }
+
         arHits.Clear();
 
-        if (!arRaycastManager.Raycast(screenPoint, arHits, trackableTypes))
+        if (!arRaycastManager.Raycast(screenPoint, arHits, WallRaycastTrackables))
         {
             return false;
         }
@@ -623,10 +640,29 @@ public class RoomColorManager : MonoBehaviour
         {
             ARRaycastHit hit = arHits[i];
             ARPlane plane = arPlaneManager.GetPlane(hit.trackableId);
-            if (!IsUsableVerticalPlane(plane, true))
+            bool usesEstimatedHit = plane == null;
+
+            if (plane != null)
             {
+                if (!IsUsableVerticalPlane(plane, true))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                if (!IsEstimatedVerticalHit(hit))
+                {
+                    continue;
+                }
+
                 plane = TryFindNearestVerticalPlane(hit.pose.position, true);
                 if (!IsUsableVerticalPlane(plane, true))
+                {
+                    continue;
+                }
+
+                if (!IsWorldPointNearPlaneBounds(plane, hit.pose.position, WallSelectionBoundsPadding))
                 {
                     continue;
                 }
@@ -637,15 +673,12 @@ public class RoomColorManager : MonoBehaviour
                 continue;
             }
 
-            float score = hit.distance;
-            if (camera != null)
-            {
-                Vector3 projected = camera.WorldToScreenPoint(plane.center);
-                if (projected.z > 0f)
-                {
-                    score += Vector2.Distance(screenPoint, new Vector2(projected.x, projected.y)) * 0.0015f;
-                }
-            }
+            float score = GetVerticalHitScore(
+                hit,
+                plane,
+                screenPoint,
+                camera,
+                usesEstimatedHit ? 0.35f : 0f);
 
             if (score < bestScore)
             {
@@ -681,7 +714,13 @@ public class RoomColorManager : MonoBehaviour
                 continue;
             }
 
-            Plane worldPlane = new Plane(plane.normal, plane.center);
+            Vector3 normal = GetPlaneNormal(plane);
+            if (normal.sqrMagnitude < 0.0001f)
+            {
+                continue;
+            }
+
+            Plane worldPlane = new Plane(normal, plane.center);
             if (!worldPlane.Raycast(ray, out float distance) || distance < 0f)
             {
                 continue;
@@ -693,9 +732,8 @@ public class RoomColorManager : MonoBehaviour
             }
 
             Vector3 worldPoint = ray.GetPoint(distance);
-            Vector3 localPoint = plane.transform.InverseTransformPoint(worldPoint);
-            Vector2 planePoint = new Vector2(localPoint.x, localPoint.z);
-            if (!IsPointInsidePlane(plane, planePoint) && !IsPointNearPlaneBounds(plane, planePoint, 0.22f))
+            if (!IsWorldPointInsidePlane(plane, worldPoint) &&
+                !IsWorldPointNearPlaneBounds(plane, worldPoint, WallSelectionBoundsPadding))
             {
                 continue;
             }
@@ -858,6 +896,66 @@ public class RoomColorManager : MonoBehaviour
         float wallMinSize = GetEffectiveMinimumWallSize(relaxedSize);
         Vector2 size = plane.size;
         return Mathf.Max(size.x, size.y) >= wallMinSize;
+    }
+
+    private static bool IsEstimatedVerticalHit(ARRaycastHit hit)
+    {
+        if ((hit.hitType & TrackableType.PlaneEstimated) == 0)
+        {
+            return false;
+        }
+
+        return IsNearVerticalByNormal(hit.pose.up);
+    }
+
+    private static float GetVerticalHitScore(
+        ARRaycastHit hit,
+        ARPlane plane,
+        Vector2 screenPoint,
+        Camera camera,
+        float fallbackPenalty)
+    {
+        float score = hit.distance + fallbackPenalty;
+        TrackableType hitType = hit.hitType;
+        if ((hitType & TrackableType.PlaneWithinPolygon) != 0)
+        {
+            score += 0f;
+        }
+        else if ((hitType & TrackableType.PlaneWithinBounds) != 0)
+        {
+            score += 0.12f;
+        }
+        else if ((hitType & TrackableType.PlaneWithinInfinity) != 0)
+        {
+            score += 0.25f;
+        }
+        else
+        {
+            score += 0.5f;
+        }
+
+        if (camera != null && plane != null)
+        {
+            Vector3 projected = camera.WorldToScreenPoint(plane.center);
+            if (projected.z > 0f)
+            {
+                score += Vector2.Distance(screenPoint, new Vector2(projected.x, projected.y)) * 0.0015f;
+            }
+        }
+
+        return score;
+    }
+
+    private static bool IsWorldPointInsidePlane(ARPlane plane, Vector3 worldPoint)
+    {
+        Vector3 localPoint = plane.transform.InverseTransformPoint(worldPoint);
+        return IsPointInsidePlane(plane, new Vector2(localPoint.x, localPoint.z));
+    }
+
+    private static bool IsWorldPointNearPlaneBounds(ARPlane plane, Vector3 worldPoint, float padding)
+    {
+        Vector3 localPoint = plane.transform.InverseTransformPoint(worldPoint);
+        return IsPointNearPlaneBounds(plane, new Vector2(localPoint.x, localPoint.z), padding);
     }
 
     private static bool IsPointInsidePlane(ARPlane plane, Vector2 planePoint)
@@ -1458,7 +1556,23 @@ public class RoomColorManager : MonoBehaviour
             return false;
         }
 
-        return IsNearVerticalByNormal(plane.normal);
+        return IsNearVerticalByNormal(GetPlaneNormal(plane));
+    }
+
+    private static Vector3 GetPlaneNormal(ARPlane plane)
+    {
+        if (plane == null)
+        {
+            return Vector3.zero;
+        }
+
+        if (plane.normal.sqrMagnitude >= 0.0001f)
+        {
+            return plane.normal.normalized;
+        }
+
+        Vector3 transformNormal = plane.transform.up;
+        return transformNormal.sqrMagnitude >= 0.0001f ? transformNormal.normalized : Vector3.zero;
     }
 
     private static bool IsNearVerticalByNormal(Vector3 normal)
