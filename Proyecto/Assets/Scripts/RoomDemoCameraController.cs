@@ -114,7 +114,7 @@ public class RoomDemoCameraController : MonoBehaviour
     {
         if (useMobileUiControls && touchLookArea != null)
         {
-            Vector2 uiDelta = touchLookArea.LookDelta;
+            Vector2 uiDelta = touchLookArea.ConsumeLookDelta();
             if (uiDelta.sqrMagnitude > 0.0001f)
             {
                 ApplyLookDelta(uiDelta.x * touchLookSensitivity, -uiDelta.y * touchLookSensitivity);

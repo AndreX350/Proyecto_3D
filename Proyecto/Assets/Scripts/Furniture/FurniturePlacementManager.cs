@@ -96,7 +96,13 @@ public class FurniturePlacementManager : MonoBehaviour
     private LayerMask floorLayerMask = ~0;
 
     [SerializeField]
+    private LayerMask roomObstacleLayerMask = 1 << 3;
+
+    [SerializeField]
     private float moveRayDistance = 100f;
+
+    [SerializeField]
+    private float roomFloorNormalDotThreshold = 0.55f;
 
     [SerializeField]
     private float rotateStepDegrees = 45f;
@@ -422,14 +428,25 @@ public class FurniturePlacementManager : MonoBehaviour
         Ray ray = cam.ScreenPointToRay(screenPoint);
         if (TryGetFloorHitPosition(ray, out Vector3 floorPosition))
         {
+            Vector3 previousPosition = selectedPlacedFurniture.transform.position;
             selectedPlacedFurniture.transform.position = floorPosition;
+            AlignFurnitureBottomToSurface(selectedPlacedFurniture, floorPosition.y);
+            if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
+            {
+                selectedPlacedFurniture.transform.position = previousPosition;
+            }
             return;
         }
 
         if (selectedDragPlane.Raycast(ray, out float enter))
         {
+            Vector3 previousPosition = selectedPlacedFurniture.transform.position;
             Vector3 planePoint = ray.GetPoint(enter);
             selectedPlacedFurniture.transform.position = planePoint;
+            if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
+            {
+                selectedPlacedFurniture.transform.position = previousPosition;
+            }
         }
     }
 
@@ -913,6 +930,12 @@ public class FurniturePlacementManager : MonoBehaviour
     {
         if (Physics.Raycast(ray, out RaycastHit floorHit, moveRayDistance, floorLayerMask))
         {
+            if (!IsValidRoomFloorHit(floorHit))
+            {
+                hitPoint = Vector3.zero;
+                return false;
+            }
+
             hitPoint = floorHit.point;
             return true;
         }
@@ -941,8 +964,14 @@ public class FurniturePlacementManager : MonoBehaviour
             return false;
         }
 
+        Vector3 previousPosition = target.transform.position;
         target.transform.position = floorPoint;
         AlignFurnitureBottomToSurface(target, floorPoint.y);
+        if (preventPlacementOnCollision && IsPlacementColliding(target))
+        {
+            target.transform.position = previousPosition;
+            return false;
+        }
         SetSelectedFurniture(target);
         return true;
     }
@@ -1837,7 +1866,8 @@ public class FurniturePlacementManager : MonoBehaviour
 
             Bounds bounds = collider.bounds;
             Vector3 halfExtents = bounds.extents * 0.96f;
-            Collider[] overlaps = Physics.OverlapBox(bounds.center, halfExtents, collider.transform.rotation, placedFurnitureLayerMask);
+            LayerMask collisionMask = placedFurnitureLayerMask | roomObstacleLayerMask;
+            Collider[] overlaps = Physics.OverlapBox(bounds.center, halfExtents, collider.transform.rotation, collisionMask);
             foreach (Collider overlap in overlaps)
             {
                 if (overlap == null)
@@ -1860,7 +1890,59 @@ public class FurniturePlacementManager : MonoBehaviour
 
                     return true;
                 }
+
+                if (IsRoomWallCollider(overlap))
+                {
+                    return true;
+                }
             }
+        }
+
+        return false;
+    }
+
+    private bool IsValidRoomFloorHit(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return false;
+        }
+
+        if (IsRoomWallCollider(hit.collider))
+        {
+            return false;
+        }
+
+        if (IsRoomFloorCollider(hit.collider))
+        {
+            return true;
+        }
+
+        return Vector3.Dot(hit.normal.normalized, Vector3.up) >= roomFloorNormalDotThreshold;
+    }
+
+    private static bool IsRoomFloorCollider(Collider collider)
+    {
+        return collider != null && collider.name.IndexOf("Room_Floor", System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsRoomWallCollider(Collider collider)
+    {
+        if (collider == null)
+        {
+            return false;
+        }
+
+        Transform current = collider.transform;
+        while (current != null)
+        {
+            string name = current.name;
+            if (name.StartsWith("Wall_", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            current = current.parent;
         }
 
         return false;

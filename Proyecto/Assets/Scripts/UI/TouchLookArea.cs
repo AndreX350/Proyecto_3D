@@ -24,7 +24,7 @@ public class TouchLookArea : MonoBehaviour, IPointerDownHandler, IPointerUpHandl
             return;
         }
 
-        lookDelta = eventData.delta * dragMultiplier;
+        lookDelta += eventData.delta * dragMultiplier;
     }
 
     public void OnPointerUp(PointerEventData eventData)
@@ -40,7 +40,17 @@ public class TouchLookArea : MonoBehaviour, IPointerDownHandler, IPointerUpHandl
 
     private void LateUpdate()
     {
-        // Consume one-frame delta so camera reads only fresh drag.
+        // If nothing consumed the delta this frame, do not let it accumulate forever.
+        if (lookDelta.sqrMagnitude < 0.0001f)
+        {
+            lookDelta = Vector2.zero;
+        }
+    }
+
+    public Vector2 ConsumeLookDelta()
+    {
+        Vector2 delta = lookDelta;
         lookDelta = Vector2.zero;
+        return delta;
     }
 }
