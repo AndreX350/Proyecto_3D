@@ -16,6 +16,12 @@ public class RoomDemoCameraController : MonoBehaviour
     [SerializeField]
     private float fixedHeight = 2.4f;
 
+    [SerializeField]
+    private Transform movementRoot;
+
+    [SerializeField]
+    private CharacterController characterController;
+
     [Header("Look")]
     [SerializeField]
     private float mouseLookSensitivity = 2.2f;
@@ -29,7 +35,6 @@ public class RoomDemoCameraController : MonoBehaviour
     [SerializeField]
     private float maxPitch = 35f;
 
-    [Header("Mobile UI Controls")]
     [SerializeField]
     private bool useMobileUiControls = true;
 
@@ -39,45 +44,64 @@ public class RoomDemoCameraController : MonoBehaviour
     [SerializeField]
     private TouchLookArea touchLookArea;
 
-    [Header("Room Bounds")]
-    [SerializeField]
-    private bool clampToRoomBounds = true;
-
-    [SerializeField]
-    private Vector3 roomMin = new Vector3(-4f, 0f, -4f);
-
-    [SerializeField]
-    private Vector3 roomMax = new Vector3(4f, 4f, 4f);
-
     private float yaw;
     private float pitch;
     private bool isLookingWithMouse;
+    private float cameraLocalHeight;
 
     private void Start()
     {
-        Vector3 euler = transform.rotation.eulerAngles;
+        ResolveMovementReferences();
+
+        Transform lookTransform = GetLookTransform();
+        Transform bodyTransform = GetMovementRoot();
+
+        if (bodyTransform != null && bodyTransform != lookTransform)
+        {
+            cameraLocalHeight = lookTransform.localPosition.y;
+            lookTransform.localPosition = new Vector3(0f, cameraLocalHeight, 0f);
+        }
+        else
+        {
+            cameraLocalHeight = 0f;
+        }
+
+        Vector3 euler = lookTransform.rotation.eulerAngles;
         yaw = euler.y;
         pitch = NormalizePitch(euler.x);
 
+        if (bodyTransform != null)
+        {
+            Vector3 bodyEuler = bodyTransform.rotation.eulerAngles;
+            yaw = bodyEuler.y;
+        }
+
+        ApplyLookRotation();
+
         if (lockHeight)
         {
-            Vector3 p = transform.position;
+            Vector3 p = bodyTransform != null ? bodyTransform.position : transform.position;
             p.y = fixedHeight;
-            transform.position = p;
+            if (bodyTransform != null)
+            {
+                bodyTransform.position = p;
+            }
+            else
+            {
+                transform.position = p;
+            }
         }
     }
 
     private void Update()
     {
+        ResolveMovementReferences();
+        NormalizeCameraLocalOffset();
         UpdateDesktopLook();
         UpdateTouchLook();
         UpdateDesktopMovement();
         UpdateTouchMovement();
-
-        if (lockHeight || clampToRoomBounds)
-        {
-            ApplyPositionConstraints();
-        }
+        ApplyPositionConstraints();
     }
 
     private void UpdateDesktopLook()
@@ -211,32 +235,53 @@ public class RoomDemoCameraController : MonoBehaviour
     {
         yaw += deltaYaw;
         pitch = Mathf.Clamp(pitch + deltaPitch, minPitch, maxPitch);
-        transform.rotation = Quaternion.Euler(pitch, yaw, 0f);
+        ApplyLookRotation();
     }
 
     private void MoveByInput(Vector3 input, float speed)
     {
-        Vector3 move = (transform.right * input.x + transform.forward * input.z);
+        Transform bodyTransform = GetMovementRoot();
+        Transform basisTransform = bodyTransform != null ? bodyTransform : transform;
+
+        Vector3 move = (basisTransform.right * input.x + basisTransform.forward * input.z);
         move.y = 0f;
-        transform.position += move * speed * Time.deltaTime;
+        Vector3 delta = move * speed * Time.deltaTime;
+
+        if (characterController != null && characterController.enabled)
+        {
+            characterController.Move(delta);
+            return;
+        }
+
+        if (bodyTransform != null)
+        {
+            bodyTransform.position += delta;
+            return;
+        }
+
+        transform.position += delta;
     }
 
     private void ApplyPositionConstraints()
     {
-        Vector3 p = transform.position;
+        if (!lockHeight)
+        {
+            return;
+        }
+
+        Transform bodyTransform = GetMovementRoot();
+        if (bodyTransform == null)
+        {
+            return;
+        }
+
+        Vector3 p = bodyTransform.position;
         if (lockHeight)
         {
             p.y = fixedHeight;
         }
 
-        if (clampToRoomBounds)
-        {
-            p.x = Mathf.Clamp(p.x, roomMin.x, roomMax.x);
-            p.y = Mathf.Clamp(p.y, roomMin.y, roomMax.y);
-            p.z = Mathf.Clamp(p.z, roomMin.z, roomMax.z);
-        }
-
-        transform.position = p;
+        bodyTransform.position = p;
     }
 
     private static float NormalizePitch(float x)
@@ -254,5 +299,58 @@ public class RoomDemoCameraController : MonoBehaviour
         float safe = Mathf.Max(0.01f, sensitivity);
         mouseLookSensitivity = safe;
         touchLookSensitivity = safe * 0.07f;
+    }
+
+    private void ResolveMovementReferences()
+    {
+        if (movementRoot == null)
+        {
+            movementRoot = transform.parent != null ? transform.parent : transform;
+        }
+
+        if (characterController == null && movementRoot != null)
+        {
+            characterController = movementRoot.GetComponent<CharacterController>();
+        }
+    }
+
+    private void NormalizeCameraLocalOffset()
+    {
+        Transform bodyTransform = GetMovementRoot();
+        if (bodyTransform == null || bodyTransform == transform)
+        {
+            return;
+        }
+
+        Vector3 localPosition = transform.localPosition;
+        if (Mathf.Abs(localPosition.x) > 0.0001f ||
+            Mathf.Abs(localPosition.z) > 0.0001f ||
+            Mathf.Abs(localPosition.y - cameraLocalHeight) > 0.0001f)
+        {
+            transform.localPosition = new Vector3(0f, cameraLocalHeight, 0f);
+        }
+    }
+
+    private Transform GetMovementRoot()
+    {
+        return movementRoot != null ? movementRoot : transform;
+    }
+
+    private Transform GetLookTransform()
+    {
+        return transform;
+    }
+
+    private void ApplyLookRotation()
+    {
+        Transform bodyTransform = GetMovementRoot();
+        if (bodyTransform != null && bodyTransform != transform)
+        {
+            bodyTransform.rotation = Quaternion.Euler(0f, yaw, 0f);
+            transform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+            return;
+        }
+
+        transform.rotation = Quaternion.Euler(pitch, yaw, 0f);
     }
 }

@@ -14,6 +14,9 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
     private float handleRange = 55f;
 
     [SerializeField]
+    private float deadZone = 0.08f;
+
+    [SerializeField]
     private bool hideWhenIdle = false;
 
     [SerializeField]
@@ -39,9 +42,24 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
             canvasGroup = GetComponent<CanvasGroup>();
         }
 
+        NormalizeHandleLayout();
         GenerateCircularHandleSprite();
+        ResetJoystick();
 
         ApplyIdleVisualState();
+    }
+
+    private void NormalizeHandleLayout()
+    {
+        if (handle == null)
+        {
+            return;
+        }
+
+        handle.anchorMin = new Vector2(0.5f, 0.5f);
+        handle.anchorMax = new Vector2(0.5f, 0.5f);
+        handle.pivot = new Vector2(0.5f, 0.5f);
+        handle.anchoredPosition = Vector2.zero;
     }
 
     private void GenerateCircularHandleSprite()
@@ -93,7 +111,7 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
 
     public void OnDrag(PointerEventData eventData)
     {
-        if (background == null)
+        if (background == null || handle == null)
         {
             return;
         }
@@ -107,14 +125,22 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
             return;
         }
 
-        float radius = Mathf.Max(1f, handleRange);
+        float radius = GetEffectiveRadius();
         Vector2 normalized = localPoint / radius;
-        input = Vector2.ClampMagnitude(normalized, 1f);
+        Vector2 clamped = Vector2.ClampMagnitude(normalized, 1f);
 
-        if (handle != null)
+        float magnitude = clamped.magnitude;
+        if (magnitude <= deadZone)
         {
-            handle.anchoredPosition = input * radius;
+            input = Vector2.zero;
         }
+        else
+        {
+            float remappedMagnitude = Mathf.InverseLerp(deadZone, 1f, magnitude);
+            input = clamped.normalized * remappedMagnitude;
+        }
+
+        handle.anchoredPosition = input * radius;
     }
 
     public void OnPointerUp(PointerEventData eventData)
@@ -155,5 +181,26 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
         }
 
         canvasGroup.alpha = 1f;
+    }
+
+    private float GetEffectiveRadius()
+    {
+        if (background == null)
+        {
+            return Mathf.Max(1f, handleRange);
+        }
+
+        float maxRadius = Mathf.Min(background.rect.width, background.rect.height) * 0.5f;
+        if (handle != null)
+        {
+            maxRadius -= Mathf.Min(handle.rect.width, handle.rect.height) * 0.5f;
+        }
+
+        if (handleRange > 0f)
+        {
+            maxRadius = Mathf.Min(maxRadius, handleRange);
+        }
+
+        return Mathf.Max(1f, maxRadius);
     }
 }

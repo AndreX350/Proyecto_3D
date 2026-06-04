@@ -105,6 +105,15 @@ public class FurniturePlacementManager : MonoBehaviour
     private float roomFloorNormalDotThreshold = 0.55f;
 
     [SerializeField]
+    private float collisionBoundsShrink = 0.9f;
+
+    [SerializeField]
+    private float allowedContactPenetration = 0.01f;
+
+    [SerializeField]
+    private float allowedWallPenetration = 0.0025f;
+
+    [SerializeField]
     private float rotateStepDegrees = 45f;
 
     [SerializeField]
@@ -428,25 +437,14 @@ public class FurniturePlacementManager : MonoBehaviour
         Ray ray = cam.ScreenPointToRay(screenPoint);
         if (TryGetFloorHitPosition(ray, out Vector3 floorPosition))
         {
-            Vector3 previousPosition = selectedPlacedFurniture.transform.position;
-            selectedPlacedFurniture.transform.position = floorPosition;
-            AlignFurnitureBottomToSurface(selectedPlacedFurniture, floorPosition.y);
-            if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
-            {
-                selectedPlacedFurniture.transform.position = previousPosition;
-            }
+            TryMoveSelectedFurnitureWithCollisionResponse(floorPosition, floorPosition.y);
             return;
         }
 
         if (selectedDragPlane.Raycast(ray, out float enter))
         {
-            Vector3 previousPosition = selectedPlacedFurniture.transform.position;
             Vector3 planePoint = ray.GetPoint(enter);
-            selectedPlacedFurniture.transform.position = planePoint;
-            if (preventPlacementOnCollision && IsPlacementColliding(selectedPlacedFurniture))
-            {
-                selectedPlacedFurniture.transform.position = previousPosition;
-            }
+            TryMoveSelectedFurnitureWithCollisionResponse(planePoint, planePoint.y);
         }
     }
 
@@ -964,16 +962,13 @@ public class FurniturePlacementManager : MonoBehaviour
             return false;
         }
 
-        Vector3 previousPosition = target.transform.position;
-        target.transform.position = floorPoint;
-        AlignFurnitureBottomToSurface(target, floorPoint.y);
-        if (preventPlacementOnCollision && IsPlacementColliding(target))
+        bool moved = TryMoveFurnitureWithCollisionResponse(target, floorPoint, floorPoint.y);
+        if (moved)
         {
-            target.transform.position = previousPosition;
-            return false;
+            SetSelectedFurniture(target);
         }
-        SetSelectedFurniture(target);
-        return true;
+
+        return moved;
     }
 
     private bool TryMoveSelectedARFurnitureToScreenPoint(Vector2 screenPoint)
@@ -1851,12 +1846,23 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private bool IsPlacementColliding(GameObject target)
     {
+        return GetCollisionSeverity(target) > allowedContactPenetration;
+    }
+
+    private float GetCollisionSeverity(GameObject target)
+    {
+        return Mathf.Max(GetFurnitureCollisionSeverity(target), GetWallCollisionSeverity(target));
+    }
+
+    private float GetFurnitureCollisionSeverity(GameObject target)
+    {
         Collider[] colliders = target.GetComponentsInChildren<Collider>();
         if (colliders == null || colliders.Length == 0)
         {
-            return false;
+            return 0f;
         }
 
+        float maxPenetration = 0f;
         foreach (Collider collider in colliders)
         {
             if (collider == null)
@@ -1865,7 +1871,7 @@ public class FurniturePlacementManager : MonoBehaviour
             }
 
             Bounds bounds = collider.bounds;
-            Vector3 halfExtents = bounds.extents * 0.96f;
+            Vector3 halfExtents = bounds.extents * collisionBoundsShrink;
             LayerMask collisionMask = placedFurnitureLayerMask | roomObstacleLayerMask;
             Collider[] overlaps = Physics.OverlapBox(bounds.center, halfExtents, collider.transform.rotation, collisionMask);
             foreach (Collider overlap in overlaps)
@@ -1888,17 +1894,154 @@ public class FurniturePlacementManager : MonoBehaviour
                         continue;
                     }
 
-                    return true;
-                }
-
-                if (IsRoomWallCollider(overlap))
-                {
-                    return true;
+                    maxPenetration = Mathf.Max(maxPenetration, GetPenetrationDepth(collider, overlap));
                 }
             }
         }
 
+        return maxPenetration;
+    }
+
+    private float GetWallCollisionSeverity(GameObject target)
+    {
+        Collider[] colliders = target.GetComponentsInChildren<Collider>();
+        if (colliders == null || colliders.Length == 0)
+        {
+            return 0f;
+        }
+
+        float maxPenetration = 0f;
+        foreach (Collider collider in colliders)
+        {
+            if (collider == null)
+            {
+                continue;
+            }
+
+            Bounds bounds = collider.bounds;
+            Vector3 halfExtents = bounds.extents * collisionBoundsShrink;
+            Collider[] overlaps = Physics.OverlapBox(bounds.center, halfExtents, collider.transform.rotation, roomObstacleLayerMask);
+            foreach (Collider overlap in overlaps)
+            {
+                if (overlap == null || overlap.transform.IsChildOf(target.transform))
+                {
+                    continue;
+                }
+
+                if (IsRoomFloorCollider(overlap))
+                {
+                    continue;
+                }
+
+                if (!IsRoomWallCollider(overlap))
+                {
+                    continue;
+                }
+
+                maxPenetration = Mathf.Max(maxPenetration, GetPenetrationDepth(collider, overlap));
+            }
+        }
+
+        return maxPenetration;
+    }
+
+    private bool TryMoveSelectedFurnitureWithCollisionResponse(Vector3 candidatePosition, float targetSurfaceY)
+    {
+        if (selectedPlacedFurniture == null)
+        {
+            return false;
+        }
+
+        return TryMoveFurnitureWithCollisionResponse(selectedPlacedFurniture, candidatePosition, targetSurfaceY);
+    }
+
+    private bool TryMoveFurnitureWithCollisionResponse(GameObject target, Vector3 candidatePosition, float targetSurfaceY)
+    {
+        if (target == null)
+        {
+            return false;
+        }
+
+        Vector3 previousPosition = target.transform.position;
+        float previousFurnitureSeverity = GetFurnitureCollisionSeverity(target);
+        float previousWallSeverity = GetWallCollisionSeverity(target);
+        if (TryApplyFurniturePosition(target, candidatePosition, targetSurfaceY, previousFurnitureSeverity, previousWallSeverity))
+        {
+            return true;
+        }
+
+        Vector3 xOnly = new Vector3(candidatePosition.x, previousPosition.y, previousPosition.z);
+        if (TryApplyFurniturePosition(target, xOnly, targetSurfaceY, previousFurnitureSeverity, previousWallSeverity))
+        {
+            return true;
+        }
+
+        Vector3 zOnly = new Vector3(previousPosition.x, previousPosition.y, candidatePosition.z);
+        if (TryApplyFurniturePosition(target, zOnly, targetSurfaceY, previousFurnitureSeverity, previousWallSeverity))
+        {
+            return true;
+        }
+
+        target.transform.position = previousPosition;
         return false;
+    }
+
+    private bool TryApplyFurniturePosition(
+        GameObject target,
+        Vector3 candidatePosition,
+        float targetSurfaceY,
+        float previousFurnitureSeverity,
+        float previousWallSeverity)
+    {
+        if (target == null)
+        {
+            return false;
+        }
+
+        Vector3 previousPosition = target.transform.position;
+        target.transform.position = candidatePosition;
+        AlignFurnitureBottomToSurface(target, targetSurfaceY);
+
+        if (preventPlacementOnCollision)
+        {
+            float newWallSeverity = GetWallCollisionSeverity(target);
+            bool blocksWall = newWallSeverity > allowedWallPenetration;
+            bool improvesWallCollision = newWallSeverity + 0.001f < previousWallSeverity;
+            if (blocksWall && !improvesWallCollision)
+            {
+                target.transform.position = previousPosition;
+                return false;
+            }
+
+            float newFurnitureSeverity = GetFurnitureCollisionSeverity(target);
+            bool blocksFurniture = newFurnitureSeverity > allowedContactPenetration;
+            bool improvesFurnitureCollision = newFurnitureSeverity + 0.0025f < previousFurnitureSeverity;
+            if (blocksFurniture && !improvesFurnitureCollision)
+            {
+                target.transform.position = previousPosition;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static float GetPenetrationDepth(Collider source, Collider other)
+    {
+        if (source == null || other == null)
+        {
+            return 0f;
+        }
+
+        if (Physics.ComputePenetration(
+                source, source.transform.position, source.transform.rotation,
+                other, other.transform.position, other.transform.rotation,
+                out _, out float distance))
+        {
+            return distance;
+        }
+
+        return 0f;
     }
 
     private bool IsValidRoomFloorHit(RaycastHit hit)

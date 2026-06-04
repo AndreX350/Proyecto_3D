@@ -15,7 +15,7 @@ EditorBuildSettings:
     path: Assets/Scenes/Options.unity
     guid: c5a68c41c08546a9a1d88d4bef44f436
   - enabled: 1
-    path: Assets/Scenes/RoomDemo.unity
+    path: Assets/Scenes/RoomDemo2.unity
     guid: c7b44b6e9d2342a6a9b43e441d22d001
   - enabled: 1
     path: Assets/Scenes/ARScene.unity
