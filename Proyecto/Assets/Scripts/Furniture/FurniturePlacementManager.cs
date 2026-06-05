@@ -206,7 +206,6 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         NormalizeARSensitivitySettings();
-        ConfigurePlaneDetectionMode();
     }
 
     private void Update()
@@ -258,7 +257,6 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         NormalizeARSensitivitySettings();
-        ConfigurePlaneDetectionMode();
     }
 
     private void UpdateARPlacementInput()
@@ -309,6 +307,13 @@ public class FurniturePlacementManager : MonoBehaviour
             {
                 ARDiagnostics.Report("Pared AR vertical seleccionada (prioridad pintura).");
                 pendingWallRetryCount = 0;
+                return;
+            }
+
+            // IMPORTANTE: Solo permitir colocaci\u00f3n si hay mueble seleccionado
+            if (selectedFurniture == null)
+            {
+                ARDiagnostics.Report("Selecciona un mueble primero antes de colocarlo.");
                 return;
             }
 
@@ -1239,16 +1244,19 @@ public class FurniturePlacementManager : MonoBehaviour
         TrackableType surfaceMask =
             TrackableType.PlaneWithinPolygon |
             TrackableType.PlaneWithinBounds |
-            TrackableType.PlaneWithinInfinity |
-            TrackableType.PlaneEstimated;
+            TrackableType.PlaneWithinInfinity |   // Incluir planos infinitos para más cobertura
+            TrackableType.PlaneEstimated;          // Incluir planos estimados como fallback
 
         arHits.Clear();
-        if (arRaycastManager.Raycast(screenPoint, arHits, surfaceMask) &&
-            TryGetHorizontalPlaneHit(out surfacePose, out hitPlane))
+        bool hasRaycastHits = arRaycastManager.Raycast(screenPoint, arHits, surfaceMask);
+        
+        // Intentar con el raycast directo
+        if (hasRaycastHits && TryGetHorizontalPlaneHit(out surfacePose, out hitPlane))
         {
             return true;
         }
 
+        // Fallback: raycast contra planos ya trackeados
         if (TryRaycastTrackedHorizontalPlane(screenPoint, out surfacePose, out hitPlane))
         {
             return true;
@@ -1269,6 +1277,13 @@ public class FurniturePlacementManager : MonoBehaviour
             ARPlane plane = arPlaneManager != null ? arPlaneManager.GetPlane(arHits[i].trackableId) : null;
             if (plane != null)
             {
+                // Verificar que sea realmente horizontal
+                if (!IsHorizontalPlane(plane))
+                {
+                    ARDiagnostics.Report("Plano raycast no es horizontal (alineación mala).");
+                    continue;
+                }
+                
                 if (!IsUsableHorizontalPlane(plane))
                 {
                     ARDiagnostics.Report("Plano horizontal detectado pero muy pequeno para colocar.");
@@ -1288,6 +1303,7 @@ public class FurniturePlacementManager : MonoBehaviour
                 continue;
             }
 
+            // Si no hay plano AR, pero es un hit estimado, considerarlo
             if (!IsEstimatedHorizontalHit(arHits[i]))
             {
                 continue;
@@ -1328,6 +1344,16 @@ public class FurniturePlacementManager : MonoBehaviour
         float bestDistance = float.MaxValue;
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
+            if (!IsHorizontalPlane(plane))
+            {
+                continue;
+            }
+
+            if (plane.trackingState == TrackingState.None)
+            {
+                continue;
+            }
+
             if (!IsUsableHorizontalPlane(plane))
             {
                 continue;
@@ -1340,7 +1366,10 @@ public class FurniturePlacementManager : MonoBehaviour
             }
 
             Vector3 worldPoint = ray.GetPoint(distance);
-            if (!IsPointNearPlaneBounds(plane, worldPoint, 0.18f))
+            // Mas permisivo: aceptar si esta dentro OR cerca del plano (con padding generoso)
+            bool pointValid = IsPointNearPlaneBounds(plane, worldPoint, 0.25f);
+            
+            if (!pointValid)
             {
                 continue;
             }
@@ -1370,12 +1399,19 @@ public class FurniturePlacementManager : MonoBehaviour
             return true;
         }
 
+        if (plane.alignment.IsVertical())
+        {
+            return false;
+        }
+
         if (plane.normal.sqrMagnitude < 0.0001f)
         {
             return false;
         }
 
-        return Mathf.Abs(Vector3.Dot(plane.normal.normalized, Vector3.up)) >= horizontalPlaneNormalDotThreshold;
+        // Más permisivo: tolera superficies ligeramente inclinadas como pisos
+        float upDot = Mathf.Abs(Vector3.Dot(plane.normal.normalized, Vector3.up));
+        return upDot >= horizontalPlaneNormalDotThreshold;
     }
 
     private bool IsUsableHorizontalPlane(ARPlane plane)
@@ -1387,8 +1423,19 @@ public class FurniturePlacementManager : MonoBehaviour
 
         Vector2 size = plane.size;
         float area = size.x * size.y;
-        float minArea = Mathf.Min(minimumHorizontalPlaneArea, relaxedHorizontalPlaneArea);
-        return area >= minArea || Mathf.Max(size.x, size.y) >= 0.16f;
+        
+        // Mayor flexibilidad en tamaño mínimo
+        float strictMinArea = minimumHorizontalPlaneArea;  // p.e. 0.04
+        float relaxedMinArea = relaxedHorizontalPlaneArea;   // p.e. 0.015
+        float minDimension = Mathf.Max(size.x, size.y);
+        
+        // Aceptar si:
+        // - Área > mínimo estricto, O
+        // - Área > mínimo relajado Y tamaño máximo > 0.16f, O
+        // - Una dimensión muy grande (>= 0.3f) aunque otra sea pequeña
+        return area >= strictMinArea ||
+            (area >= relaxedMinArea && minDimension >= 0.16f) ||
+            minDimension >= 0.3f;
     }
 
     private bool IsEstimatedHorizontalHit(ARRaycastHit hit)
@@ -1815,25 +1862,15 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private void NormalizeARSensitivitySettings()
     {
-        minimumHorizontalPlaneArea = Mathf.Min(minimumHorizontalPlaneArea, 0.025f);
-        relaxedHorizontalPlaneArea = Mathf.Clamp(relaxedHorizontalPlaneArea, 0.006f, minimumHorizontalPlaneArea);
-        horizontalPlaneNormalDotThreshold = Mathf.Clamp(horizontalPlaneNormalDotThreshold, 0.35f, 0.85f);
-        estimatedSurfaceUpDotThreshold = Mathf.Min(estimatedSurfaceUpDotThreshold, 0.55f);
+        // Permitir detectar pisos m\u00e1s peque\u00f1os
+        minimumHorizontalPlaneArea = Mathf.Min(minimumHorizontalPlaneArea, 0.04f);
+        relaxedHorizontalPlaneArea = Mathf.Clamp(relaxedHorizontalPlaneArea, 0.01f, minimumHorizontalPlaneArea);
+        
+        // Ligeramente m\u00e1s permisivo en el\u00a0umbral de verticalidad de la normal
+        horizontalPlaneNormalDotThreshold = Mathf.Clamp(horizontalPlaneNormalDotThreshold, 0.4f, 0.85f);
+        
+        estimatedSurfaceUpDotThreshold = Mathf.Min(estimatedSurfaceUpDotThreshold, 0.6f);
         furnitureGroundingOffset = Mathf.Clamp(furnitureGroundingOffset, -0.01f, 0.03f);
-    }
-
-    private void ConfigurePlaneDetectionMode()
-    {
-        if (arPlaneManager == null)
-        {
-            return;
-        }
-
-        PlaneDetectionMode requestedMode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
-        if (arPlaneManager.requestedDetectionMode != requestedMode)
-        {
-            arPlaneManager.requestedDetectionMode = requestedMode;
-        }
     }
 
     private Vector3 SnapPositionToGrid(Vector3 worldPosition)

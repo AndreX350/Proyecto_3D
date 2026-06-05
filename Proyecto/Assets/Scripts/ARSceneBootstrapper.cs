@@ -75,7 +75,6 @@ public class ARSceneBootstrapper : MonoBehaviour
         {
             Component planeManager = AddComponentIfMissing(originObject, arPlaneManagerType);
             SetPlanePrefab(planeManager);
-            SetPlaneDetectionMode(planeManager);
             EnableComponent(planeManager);
         }
 
@@ -302,35 +301,6 @@ public class ARSceneBootstrapper : MonoBehaviour
         if (planePrefabProperty.GetValue(planeManager) == null)
         {
             planePrefabProperty.SetValue(planeManager, defaultPlanePrefab);
-        }
-    }
-
-    private static void SetPlaneDetectionMode(Component planeManager)
-    {
-        if (planeManager == null)
-        {
-            return;
-        }
-
-        try
-        {
-            PropertyInfo requestedDetectionModeProperty = planeManager.GetType().GetProperty("requestedDetectionMode");
-            if (requestedDetectionModeProperty != null && requestedDetectionModeProperty.CanWrite)
-            {
-                Type planeDetectionModeType = requestedDetectionModeProperty.PropertyType;
-                int horizontal = Convert.ToInt32(Enum.Parse(planeDetectionModeType, "Horizontal"));
-                int vertical = Convert.ToInt32(Enum.Parse(planeDetectionModeType, "Vertical"));
-                object combined = Enum.ToObject(planeDetectionModeType, horizontal | vertical);
-                requestedDetectionModeProperty.SetValue(planeManager, combined);
-                EnableComponent(planeManager);
-                return;
-            }
-
-            EnableComponent(planeManager);
-        }
-        catch
-        {
-            EnableComponent(planeManager);
         }
     }
 

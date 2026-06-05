@@ -3,7 +3,15 @@ guid: f92b972309fb80248b3b8d1ae3a39d4f
 MonoImporter:
   externalObjects: {}
   serializedVersion: 2
-  defaultReferences: []
+  defaultReferences:
+  - spawnPoint: {instanceID: 0}
+  - selectedFurniture: {instanceID: 0}
+  - arRaycastManager: {instanceID: 0}
+  - arPlaneManager: {instanceID: 0}
+  - arAnchorManager: {instanceID: 0}
+  - placementCamera: {instanceID: 0}
+  - roomColorManager: {fileID: 8597941106413540957, guid: 0838322d2eb0e86448d94523462b17dc,
+      type: 3}
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 

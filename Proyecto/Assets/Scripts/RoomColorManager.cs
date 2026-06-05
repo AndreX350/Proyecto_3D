@@ -50,9 +50,6 @@ public class RoomColorManager : MonoBehaviour
     private float minimumVisibleWallOverlayHeight = 0.42f;
 
     [SerializeField]
-    private float virtualWallFallbackDistance = 2.2f;
-
-    [SerializeField]
     private bool requireExplicitApplyInAR = true;
 
     [SerializeField]
@@ -74,11 +71,6 @@ public class RoomColorManager : MonoBehaviour
     private ARRaycastManager arRaycastManager;
     private ARPlaneManager arPlaneManager;
     private ARPlane selectedARWall;
-    private Renderer selectedVirtualWallRenderer;
-    private Renderer virtualWallRenderer;
-    private LineRenderer virtualWallOutline;
-    private bool hasVirtualWallColor;
-    private Color virtualWallColor = Color.white;
     private float selectedWallBoostUntil;
     private float verticalDetectionReadyTime;
     private Color pendingWallColor = Color.white;
@@ -88,9 +80,7 @@ public class RoomColorManager : MonoBehaviour
 
     private const TrackableType WallRaycastTrackables =
         TrackableType.PlaneWithinPolygon |
-        TrackableType.PlaneWithinBounds |
-        TrackableType.PlaneWithinInfinity |
-        TrackableType.PlaneEstimated;
+        TrackableType.PlaneWithinBounds;
 
     private const float WallSelectionBoundsPadding = 0.24f;
 
@@ -125,7 +115,7 @@ public class RoomColorManager : MonoBehaviour
         ResolveARManagers();
         AddDetectedARWalls();
 
-        if (ShouldRequireExplicitApply() && selectedARWall == null && selectedVirtualWallRenderer == null)
+        if (ShouldRequireExplicitApply() && selectedARWall == null)
         {
             pendingWallColor = color;
             hasPendingWallColor = true;
@@ -136,16 +126,6 @@ public class RoomColorManager : MonoBehaviour
         currentWallColor = color;
         hasCurrentWallColor = true;
         hasPendingWallColor = false;
-
-        if (selectedVirtualWallRenderer != null)
-        {
-            virtualWallColor = color;
-            hasVirtualWallColor = true;
-            ApplyColorToRenderer(selectedVirtualWallRenderer, color, arWallOverlayAlpha);
-            UpdateSelectedWallVisuals();
-            ARDiagnostics.Report("Color aplicado a pared virtual seleccionada.");
-            return true;
-        }
 
         if (selectedARWall != null)
         {
@@ -222,8 +202,6 @@ public class RoomColorManager : MonoBehaviour
         pendingWallColor = Color.white;
         hasPendingWallColor = false;
         arWallAppliedColors.Clear();
-        hasVirtualWallColor = false;
-        virtualWallColor = Color.white;
         ClearSelectedWall();
 
         if (wallRenderers.Count == 0)
@@ -262,11 +240,6 @@ public class RoomColorManager : MonoBehaviour
             return "Pared AR " + GetWallIndex(selectedARWall) + " seleccionada";
         }
 
-        if (selectedVirtualWallRenderer != null)
-        {
-            return "Pared virtual seleccionada";
-        }
-
         return "Sin pared seleccionada";
     }
 
@@ -274,9 +247,9 @@ public class RoomColorManager : MonoBehaviour
 
     public bool ShouldPrioritizeWallSelection() => hasPendingWallColor;
 
-    public bool HasAppliedWallColor() => hasCurrentWallColor || arWallAppliedColors.Count > 0 || hasVirtualWallColor;
+    public bool HasAppliedWallColor() => hasCurrentWallColor || arWallAppliedColors.Count > 0;
 
-    private bool HasSelectedWall() => selectedARWall != null || selectedVirtualWallRenderer != null;
+    private bool HasSelectedWall() => selectedARWall != null;
 
     public string GetWallStatusText()
     {
@@ -330,14 +303,32 @@ public class RoomColorManager : MonoBehaviour
 
         if (!TrySelectWallImmediate(screenPoint, out ARPlane plane))
         {
-            if (TrySelectVirtualWallAtScreenPoint(screenPoint, out Renderer virtualRenderer))
+            // Debug: contar planos verticales detectados y mostrar diagnóstico detallado
+            Debug.Log($"\n=== DIAGNÓSTICO DE FALLO DE SELECCIÓN ===");
+            Debug.Log($"ScreenPoint: {screenPoint}");
+            int verticalCount = 0;
+            int visibleScreenCount = 0;
+            
+            foreach (ARPlane p in arPlaneManager.trackables)
             {
-                SelectVirtualWall(virtualRenderer);
-                return true;
+                if (IsVerticalLikePlane(p) && p.trackingState != TrackingState.None)
+                {
+                    verticalCount++;
+                    if (TryGetPlaneScreenRect(Camera.main, p, out Rect screenRect))
+                    {
+                        visibleScreenCount++;
+                        bool contains = screenRect.Contains(screenPoint);
+                        Debug.Log($"  Plano {p.trackableId}: Rect={screenRect}, ContainsTap={contains}, Tracking={p.trackingState}, Size={p.size}");
+                    }
+                }
             }
-
+            
+            Debug.Log($"Planos verticales en escena: {verticalCount}, Visibles en pantalla: {visibleScreenCount}");
+            Debug.Log($"=== FIN DIAGNÓSTICO ===\n");
+            
+            ClearSelectedWall();
             TryScheduleWallSelectionRetry(screenPoint);
-            ARDiagnostics.Report("Raycast AR a pared sin plano vertical util.");
+            ARDiagnostics.Report("✗ Raycast AR sin pared. " + verticalCount + " planos verticales en escena.");
             return false;
         }
 
@@ -348,134 +339,66 @@ public class RoomColorManager : MonoBehaviour
     private bool TrySelectWallImmediate(Vector2 screenPoint, out ARPlane plane)
     {
         plane = null;
-        return TryGetVerticalWallHit(screenPoint, out plane) ||
-            TryRaycastTrackedVerticalWall(screenPoint, out plane) ||
-            TryGetClosestVerticalWallAtScreenPoint(screenPoint, out plane);
-    }
-
-    private bool TrySelectVirtualWallAtScreenPoint(Vector2 screenPoint, out Renderer renderer)
-    {
-        renderer = null;
-        Camera camera = Camera.main;
-        if (camera == null)
+        
+        // Debug: contar planos verticales disponibles
+        int totalVerticalPlanes = 0;
+        int visibleOnScreen = 0;
+        foreach (ARPlane p in arPlaneManager.trackables)
         {
-            return false;
-        }
-
-        if (virtualWallRenderer != null &&
-            TryGetRendererScreenRect(camera, virtualWallRenderer, out Rect existingRect))
-        {
-            Rect paddedRect = existingRect;
-            paddedRect.xMin -= wallSelectionScreenPadding;
-            paddedRect.xMax += wallSelectionScreenPadding;
-            paddedRect.yMin -= wallSelectionScreenPadding;
-            paddedRect.yMax += wallSelectionScreenPadding;
-            if (paddedRect.Contains(screenPoint))
+            if (IsVerticalLikePlane(p) && p.trackingState != TrackingState.None)
             {
-                renderer = virtualWallRenderer;
-                return true;
+                totalVerticalPlanes++;
+                if (TryGetPlaneScreenRect(Camera.main, p, out _))
+                {
+                    visibleOnScreen++;
+                }
             }
         }
-
-        if (TryCreateVirtualWallFromFeaturePoint(screenPoint, camera, out renderer))
+        Debug.Log($"[SelectWall] Total planos verticales: {totalVerticalPlanes}, Visibles en pantalla: {visibleOnScreen}");
+        
+        // Primero intentar selección visual (más confiable en AR)
+        if (TryGetVisibleVerticalWallAtScreenPoint(screenPoint, out plane))
         {
+            Debug.Log($"[SelectWall] SUCCESS: Pared seleccionada por visibilidad en pantalla. TrackableId: {plane.trackableId}");
+            ARDiagnostics.Report("✓ Pared seleccionada por visibilidad");
             return true;
         }
-
-        renderer = CreateOrMoveVirtualWallFromCameraRay(screenPoint, camera);
-        return renderer != null;
-    }
-
-    private bool TryCreateVirtualWallFromFeaturePoint(Vector2 screenPoint, Camera camera, out Renderer renderer)
-    {
-        renderer = null;
-        if (arRaycastManager == null)
+        else
         {
-            return false;
+            Debug.Log($"[SelectWall] FALLO: TryGetVisibleVerticalWallAtScreenPoint retornó false");
         }
-
-        arHits.Clear();
-        if (!arRaycastManager.Raycast(screenPoint, arHits, TrackableType.FeaturePoint))
+        
+        // Fallback: intentar raycast directo
+        if (TryGetVerticalWallHit(screenPoint, out plane))
         {
-            return false;
+            Debug.Log($"[SelectWall] SUCCESS: Pared seleccionada por raycast AR directo. TrackableId: {plane.trackableId}");
+            ARDiagnostics.Report("✓ Pared seleccionada por raycast directo");
+            return true;
         }
-
-        ARRaycastHit bestHit = arHits[0];
-        for (int i = 1; i < arHits.Count; i++)
+        else
         {
-            if (arHits[i].distance < bestHit.distance)
-            {
-                bestHit = arHits[i];
-            }
+            Debug.Log($"[SelectWall] FALLO: TryGetVerticalWallHit retornó false");
         }
-
-        renderer = CreateOrMoveVirtualWall(bestHit.pose.position, camera);
-        return renderer != null;
-    }
-
-    private Renderer CreateOrMoveVirtualWallFromCameraRay(Vector2 screenPoint, Camera camera)
-    {
-        Ray ray = camera.ScreenPointToRay(screenPoint);
-        float distance = Mathf.Clamp(virtualWallFallbackDistance, 0.8f, maxWallSelectionDistance);
-        return CreateOrMoveVirtualWall(ray.GetPoint(distance), camera);
-    }
-
-    private Renderer CreateOrMoveVirtualWall(Vector3 position, Camera camera)
-    {
-        if (camera == null)
+        
+        // Último fallback: raycast contra planos trackeados
+        if (TryRaycastTrackedVerticalWall(screenPoint, out plane))
         {
-            return null;
+            Debug.Log($"[SelectWall] SUCCESS: Pared seleccionada por raycast contra planos trackeados. TrackableId: {plane.trackableId}");
+            ARDiagnostics.Report("✓ Pared seleccionada por raycast trackeado");
+            return true;
         }
-
-        if (virtualWallRenderer == null)
+        else
         {
-            GameObject wallObject = new GameObject(WallOverlayName);
-            MeshFilter meshFilter = wallObject.AddComponent<MeshFilter>();
-            virtualWallRenderer = wallObject.AddComponent<MeshRenderer>();
-            virtualWallRenderer.receiveShadows = false;
-            virtualWallRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            virtualWallRenderer.sharedMaterial = CreateARWallMaterial(detectedWallTint, detectedWallOverlayAlpha);
-            virtualWallOutline = wallObject.AddComponent<LineRenderer>();
-            ConfigureWallOutline(virtualWallOutline);
-            UpdateVirtualWallMesh(meshFilter, virtualWallOutline);
+            Debug.Log($"[SelectWall] FALLO: TryRaycastTrackedVerticalWall retornó false");
         }
-
-        Transform wallTransform = virtualWallRenderer.transform;
-        Vector3 normalTowardCamera = camera.transform.position - position;
-        normalTowardCamera.y = 0f;
-        if (normalTowardCamera.sqrMagnitude < 0.0001f)
-        {
-            normalTowardCamera = -camera.transform.forward;
-            normalTowardCamera.y = 0f;
-        }
-
-        normalTowardCamera.Normalize();
-        wallTransform.SetPositionAndRotation(
-            position,
-            Quaternion.LookRotation(normalTowardCamera, Vector3.up));
-
-        virtualWallRenderer.enabled = true;
-        if (virtualWallOutline != null)
-        {
-            virtualWallOutline.enabled = true;
-        }
-
-        if (!wallRenderers.Contains(virtualWallRenderer))
-        {
-            wallRenderers.Add(virtualWallRenderer);
-        }
-
-        ApplyColorToRenderer(
-            virtualWallRenderer,
-            hasVirtualWallColor ? virtualWallColor : detectedWallTint,
-            hasVirtualWallColor ? arWallOverlayAlpha : detectedWallOverlayAlpha);
-        return virtualWallRenderer;
+        
+        Debug.Log($"[SelectWall] NINGÚN MÉTODO FUNCIONÓ. ScreenPoint: {screenPoint}");
+        return false;
     }
 
     private void SelectARWall(ARPlane plane)
     {
         selectedARWall = plane;
-        selectedVirtualWallRenderer = null;
         Renderer renderer = EnsureARWallOverlay(plane);
         if (renderer != null && !wallRenderers.Contains(renderer))
         {
@@ -497,37 +420,9 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
-    private void SelectVirtualWall(Renderer renderer)
-    {
-        if (renderer == null)
-        {
-            return;
-        }
-
-        selectedARWall = null;
-        selectedVirtualWallRenderer = renderer;
-        selectedWallBoostUntil = Time.unscaledTime + selectedWallBoostDuration;
-        if (!wallRenderers.Contains(renderer))
-        {
-            wallRenderers.Add(renderer);
-        }
-
-        UpdateSelectedWallVisuals();
-        ARDiagnostics.Report("Pared virtual seleccionada para color.");
-
-        if (autoApplyPendingColorOnWallSelect && hasPendingWallColor)
-        {
-            Color queuedColor = pendingWallColor;
-            hasPendingWallColor = false;
-            ApplyWallColor(queuedColor);
-            ARDiagnostics.Report("Color pendiente aplicado automaticamente a pared virtual.");
-        }
-    }
-
     public void ClearSelectedWall()
     {
         selectedARWall = null;
-        selectedVirtualWallRenderer = null;
         selectedWallBoostUntil = 0f;
         UpdateSelectedWallVisuals();
     }
@@ -608,15 +503,6 @@ public class RoomColorManager : MonoBehaviour
         {
             arPlaneManager = FindObjectOfType<ARPlaneManager>();
         }
-
-        if (arPlaneManager != null)
-        {
-            PlaneDetectionMode requestedMode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
-            if (arPlaneManager.requestedDetectionMode != requestedMode)
-            {
-                arPlaneManager.requestedDetectionMode = requestedMode;
-            }
-        }
     }
 
     private bool TryGetVerticalWallHit(Vector2 screenPoint, out ARPlane wallPlane)
@@ -624,52 +510,71 @@ public class RoomColorManager : MonoBehaviour
         wallPlane = null;
         if (arRaycastManager == null || arPlaneManager == null)
         {
+            Debug.Log("[TryGetVerticalWallHit] ERROR: arRaycastManager o arPlaneManager es null");
             return false;
         }
 
         arHits.Clear();
 
-        if (!arRaycastManager.Raycast(screenPoint, arHits, WallRaycastTrackables))
+        // Intentar raycast con trackables más permisivos
+        TrackableType wallMaskExpanded = 
+            TrackableType.PlaneWithinPolygon |
+            TrackableType.PlaneWithinBounds |
+            TrackableType.PlaneWithinInfinity;  // Incluir PlaneWithinInfinity para paredes lejanas
+
+        bool hasHits = arRaycastManager.Raycast(screenPoint, arHits, wallMaskExpanded);
+        
+        // Si no hay hits, intentar con solo los trackables estándar
+        if (!hasHits)
         {
+            hasHits = arRaycastManager.Raycast(screenPoint, arHits, WallRaycastTrackables);
+        }
+        
+        if (!hasHits || arHits.Count == 0)
+        {
+            Debug.Log($"[TryGetVerticalWallHit] No raycast hits encontrados en {screenPoint}");
             return false;
         }
+        
+        Debug.Log($"[TryGetVerticalWallHit] Raycast encontró {arHits.Count} hits");
 
         Camera camera = Camera.main;
         float bestScore = float.MaxValue;
+        int checkedHits = 0;
+        
         for (int i = 0; i < arHits.Count; i++)
         {
             ARRaycastHit hit = arHits[i];
+            checkedHits++;
+            
             ARPlane plane = arPlaneManager.GetPlane(hit.trackableId);
-            bool usesEstimatedHit = plane == null;
-
-            if (plane != null)
+            
+            if (plane == null)
             {
-                if (!IsUsableVerticalPlane(plane, true))
-                {
-                    continue;
-                }
+                Debug.Log($"[TryGetVerticalWallHit] Hit {i}: plano es null");
+                continue;
             }
-            else
+            
+            Debug.Log($"[TryGetVerticalWallHit] Hit {i}: ID={plane.trackableId}, HitType={hit.hitType}");
+            
+            // Check de verticalidad más flexible (no requerir tamaño específico si es un raycast hit)
+            if (!IsVerticalLikePlane(plane))
             {
-                if (!IsEstimatedVerticalHit(hit))
-                {
-                    continue;
-                }
+                Debug.Log($"[TryGetVerticalWallHit] Hit {i}: NO es vertical");
+                continue;
+            }
+            
+            Debug.Log($"[TryGetVerticalWallHit] Hit {i}: ✓ Es vertical");
 
-                plane = TryFindNearestVerticalPlane(hit.pose.position, true);
-                if (!IsUsableVerticalPlane(plane, true))
-                {
-                    continue;
-                }
-
-                if (!IsWorldPointNearPlaneBounds(plane, hit.pose.position, WallSelectionBoundsPadding))
-                {
-                    continue;
-                }
+            if (plane.trackingState == TrackingState.None)
+            {
+                Debug.Log($"[TryGetVerticalWallHit] Hit {i}: Tracking=None");
+                continue;
             }
 
-            if (!IsPlaneWithinSelectionDistance(camera, plane))
+            if (!IsPlaneWithinSelectionDistance(Camera.main, plane))
             {
+                Debug.Log($"[TryGetVerticalWallHit] Hit {i}: Fuera de distancia máxima");
                 continue;
             }
 
@@ -677,16 +582,20 @@ public class RoomColorManager : MonoBehaviour
                 hit,
                 plane,
                 screenPoint,
-                camera,
-                usesEstimatedHit ? 0.35f : 0f);
+                Camera.main,
+                0f);
+            
+            Debug.Log($"[TryGetVerticalWallHit] Hit {i}: Score={score:F3}");
 
             if (score < bestScore)
             {
                 bestScore = score;
                 wallPlane = plane;
+                Debug.Log($"[TryGetVerticalWallHit] → Nuevo mejor hit");
             }
         }
-
+        
+        Debug.Log($"[TryGetVerticalWallHit] Resultado: {(wallPlane != null ? "SUCCESS" : "FALLO")}");
         return wallPlane != null;
     }
 
@@ -695,136 +604,185 @@ public class RoomColorManager : MonoBehaviour
         wallPlane = null;
         if (arPlaneManager == null)
         {
+            Debug.Log("[TryRaycastTracked] ERROR: arPlaneManager es null");
             return false;
         }
 
         Camera camera = Camera.main;
         if (camera == null)
         {
+            Debug.Log("[TryRaycastTracked] ERROR: Camera.main es null");
             return false;
         }
 
         Ray ray = camera.ScreenPointToRay(screenPoint);
         float bestDistance = float.MaxValue;
+        int checkedPlanes = 0;
+        int verticalPlanes = 0;
 
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (!IsUsableVerticalPlane(plane, true))
+            checkedPlanes++;
+            
+            // Usar check más flexible de verticalidad
+            if (!IsVerticalLikePlane(plane))
             {
+                continue;
+            }
+            verticalPlanes++;
+            
+            Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: vertical check OK");
+
+            if (plane.trackingState == TrackingState.None)
+            {
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: tracking=None");
                 continue;
             }
 
             Vector3 normal = GetPlaneNormal(plane);
             if (normal.sqrMagnitude < 0.0001f)
             {
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: normal inválida");
                 continue;
             }
+            
+            Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: normal OK, normal={normal}");
 
             Plane worldPlane = new Plane(normal, plane.center);
             if (!worldPlane.Raycast(ray, out float distance) || distance < 0f)
             {
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: raycast sin intersección");
                 continue;
             }
+            
+            Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: ✓ intersectó a distance={distance:F3}m");
 
             if (distance > maxWallSelectionDistance)
             {
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: fuera de distancia máxima ({maxWallSelectionDistance}m)");
                 continue;
             }
 
             Vector3 worldPoint = ray.GetPoint(distance);
-            if (!IsWorldPointInsidePlane(plane, worldPoint) &&
-                !IsWorldPointNearPlaneBounds(plane, worldPoint, WallSelectionBoundsPadding))
+            
+            // Validación de punto dentro/cerca del plano con padding MUY generoso
+            bool pointInside = IsWorldPointInsidePlane(plane, worldPoint);
+            bool pointNearPadding1 = IsWorldPointNearPlaneBounds(plane, worldPoint, WallSelectionBoundsPadding);
+            bool pointNearPadding3 = IsWorldPointNearPlaneBounds(plane, worldPoint, WallSelectionBoundsPadding * 3f);
+            
+            bool pointValid = pointInside || pointNearPadding1 || pointNearPadding3;
+            
+            Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: inside={pointInside}, padding1={pointNearPadding1}, padding3={pointNearPadding3}");
+                
+            // Si aún no es válido, pero el raycast intersectó, aceptarlo igualmente
+            // (el raycast ya filtró planos que no están en el rayo)
+            if (!pointValid && plane.trackingState != TrackingState.Tracking)
             {
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: punto no válido y no Tracking");
                 continue;
+            }
+            
+            if (!pointValid && plane.trackingState == TrackingState.Tracking)
+            {
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: ✓ Aceptado porque está siendo Tracked");
             }
 
             if (distance < bestDistance)
             {
                 bestDistance = distance;
                 wallPlane = plane;
+                Debug.Log($"[TryRaycastTracked] Plano {plane.trackableId}: → Nuevo mejor candidato");
             }
         }
-
+        
+        Debug.Log($"[TryRaycastTracked] RESUMEN: Chequeados={checkedPlanes}, Verticales={verticalPlanes}, Resultado={wallPlane != null}");
         return wallPlane != null;
     }
 
-    private bool TryGetClosestVerticalWallAtScreenPoint(Vector2 screenPoint, out ARPlane wallPlane)
+    private bool TryGetVisibleVerticalWallAtScreenPoint(Vector2 screenPoint, out ARPlane wallPlane)
     {
         wallPlane = null;
         if (arPlaneManager == null)
         {
+            Debug.Log("[TryGetVisibleVertical] ERROR: arPlaneManager es null");
             return false;
         }
 
         Camera camera = Camera.main;
         if (camera == null)
         {
+            Debug.Log("[TryGetVisibleVertical] ERROR: Camera.main es null");
             return false;
         }
 
         float bestScore = float.MaxValue;
-        bool hasVisibleWallRect = false;
+        int checkedPlanes = 0;
+        int verticalPlanes = 0;
+        int screenRectFailed = 0;
+        
         foreach (ARPlane plane in arPlaneManager.trackables)
         {
-            if (!IsUsableVerticalPlane(plane, true))
+            checkedPlanes++;
+            
+            // Check flexible de verticalidad
+            if (!IsVerticalLikePlane(plane))
             {
+                continue;
+            }
+            verticalPlanes++;
+            
+            if (plane.trackingState == TrackingState.None)
+            {
+                Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: tracking=None");
                 continue;
             }
 
             if (!TryGetPlaneScreenRect(camera, plane, out Rect screenRect))
             {
+                screenRectFailed++;
+                Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: TryGetPlaneScreenRect falló");
                 continue;
             }
-
-            hasVisibleWallRect = true;
+            
+            Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: screenRect={screenRect}, tap={screenPoint}");
 
             Rect paddedRect = screenRect;
-            paddedRect.xMin -= wallSelectionScreenPadding;
-            paddedRect.xMax += wallSelectionScreenPadding;
-            paddedRect.yMin -= wallSelectionScreenPadding;
-            paddedRect.yMax += wallSelectionScreenPadding;
+            paddedRect.xMin -= wallSelectionScreenPadding * 1.5f;
+            paddedRect.xMax += wallSelectionScreenPadding * 1.5f;
+            paddedRect.yMin -= wallSelectionScreenPadding * 1.5f;
+            paddedRect.yMax += wallSelectionScreenPadding * 1.5f;
 
             if (!paddedRect.Contains(screenPoint))
             {
+                Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: paddedRect NO contiene el tap");
                 continue;
             }
+            
+            Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: ✓ paddedRect SÍ contiene el tap");
 
+            // Mejor scoring: selecciona el plano más cercano a donde tocó
             float centerDistance = Vector2.Distance(screenRect.center, screenPoint);
-            float score = screenRect.Contains(screenPoint) ? centerDistance * 0.25f : centerDistance;
-            if (score < bestScore)
+            
+            // Si está dentro, excelente - tomar el más cercano al centro
+            if (screenRect.Contains(screenPoint))
             {
-                bestScore = score;
+                Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: ✓ DENTRO del rect. Distance={centerDistance}");
+                if (centerDistance < bestScore)
+                {
+                    bestScore = centerDistance;
+                    wallPlane = plane;
+                    Debug.Log($"[TryGetVisibleVertical] → Nuevo MEJOR plano seleccionado");
+                }
+            }
+            else if (wallPlane == null)
+            {
+                // Fallback: si no hay tap dentro, aceptar cualquiera en área padded
+                Debug.Log($"[TryGetVisibleVertical] Plano {plane.trackableId}: En área padded (sin tap dentro aún)");
                 wallPlane = plane;
             }
         }
-
-        if (wallPlane != null)
-        {
-            return true;
-        }
-
-        if (hasVisibleWallRect)
-        {
-            return false;
-        }
-
-        Vector3 cameraPosition = camera.transform.position;
-        float minDistance = float.MaxValue;
-        foreach (ARPlane plane in arPlaneManager.trackables)
-        {
-            if (!IsUsableVerticalPlane(plane, true))
-            {
-                continue;
-            }
-
-            float distance = Vector3.Distance(cameraPosition, plane.transform.position);
-            if (distance < minDistance)
-            {
-                minDistance = distance;
-                wallPlane = plane;
-            }
-        }
-
+        
+        Debug.Log($"[TryGetVisibleVertical] RESUMEN: Chequeados={checkedPlanes}, Verticales={verticalPlanes}, ScreenRectFailed={screenRectFailed}, Resultado={wallPlane != null}");
         return wallPlane != null;
     }
 
@@ -898,16 +856,6 @@ public class RoomColorManager : MonoBehaviour
         return Mathf.Max(size.x, size.y) >= wallMinSize;
     }
 
-    private static bool IsEstimatedVerticalHit(ARRaycastHit hit)
-    {
-        if ((hit.hitType & TrackableType.PlaneEstimated) == 0)
-        {
-            return false;
-        }
-
-        return IsNearVerticalByNormal(hit.pose.up);
-    }
-
     private static float GetVerticalHitScore(
         ARRaycastHit hit,
         ARPlane plane,
@@ -924,10 +872,6 @@ public class RoomColorManager : MonoBehaviour
         else if ((hitType & TrackableType.PlaneWithinBounds) != 0)
         {
             score += 0.12f;
-        }
-        else if ((hitType & TrackableType.PlaneWithinInfinity) != 0)
-        {
-            score += 0.25f;
         }
         else
         {
@@ -1009,6 +953,80 @@ public class RoomColorManager : MonoBehaviour
         return (b.x - a.x) * (point.y - a.y) - (point.x - a.x) * (b.y - a.y);
     }
 
+    /// <summary>
+    /// Filtra planos verticales para remover duplicados/sobrelapados.
+    /// Si dos planos están muy cercanos en posición y tamaño, mantiene solo el que está siendo tracked más activamente.
+    /// </summary>
+    private List<ARPlane> FilterDuplicateVerticalPlanes(TrackableCollection<ARPlane> planes)
+    {
+        List<ARPlane> filtered = new List<ARPlane>();
+        List<ARPlane> allPlanes = new List<ARPlane>();
+        
+        // Convertir TrackableCollection a List
+        foreach (ARPlane p in planes)
+        {
+            allPlanes.Add(p);
+        }
+        
+        float overlapThreshold = 0.15f; // 15cm - si dos planos están más cerca, considerar duplicados
+        
+        foreach (ARPlane candidate in allPlanes)
+        {
+            if (!IsVerticalLikePlane(candidate) || candidate.trackingState == TrackingState.None)
+            {
+                continue;
+            }
+
+            bool isDuplicate = false;
+            
+            // Comparar con planos ya agregados
+            for (int i = filtered.Count - 1; i >= 0; i--)
+            {
+                ARPlane existing = filtered[i];
+                
+                // Calcular distancia entre centros
+                float centerDistance = Vector3.Distance(candidate.center, existing.center);
+                
+                // Si están muy cercanos, es probable que sean el mismo plano duplicado
+                if (centerDistance < overlapThreshold)
+                {
+                    // Mantener el que está being tracked más recientemente
+                    if (candidate.trackingState == TrackingState.Tracking && existing.trackingState != TrackingState.Tracking)
+                    {
+                        filtered[i] = candidate;
+                        Debug.Log($"[FilterDuplicate] Reemplazado plano {existing.trackableId} con {candidate.trackableId} (más reciente). Distance={centerDistance:F3}m");
+                    }
+                    else
+                    {
+                        Debug.Log($"[FilterDuplicate] Descartado plano duplicado {candidate.trackableId} (cercano a {existing.trackableId}). Distance={centerDistance:F3}m");
+                    }
+                    isDuplicate = true;
+                    break;
+                }
+                
+                // También revisar si los tamaños son muy similares y los centros están alineados
+                Vector2 sizeA = candidate.size;
+                Vector2 sizeB = existing.size;
+                float sizeSimilarity = Mathf.Abs(sizeA.x - sizeB.x) + Mathf.Abs(sizeA.y - sizeB.y);
+                
+                if (centerDistance < overlapThreshold * 2f && sizeSimilarity < 0.05f)
+                {
+                    Debug.Log($"[FilterDuplicate] Descartado plano {candidate.trackableId} - muy similar a {existing.trackableId}. Distance={centerDistance:F3}m, SizeDiff={sizeSimilarity:F3}");
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            
+            if (!isDuplicate)
+            {
+                filtered.Add(candidate);
+            }
+        }
+        
+        Debug.Log($"[FilterDuplicate] Total planos: {allPlanes.Count}, Después de filtrar: {filtered.Count}");
+        return filtered;
+    }
+
     private void AddDetectedARWalls()
     {
         if (arPlaneManager == null || Time.unscaledTime < verticalDetectionReadyTime)
@@ -1016,7 +1034,10 @@ public class RoomColorManager : MonoBehaviour
             return;
         }
 
-        foreach (ARPlane plane in arPlaneManager.trackables)
+        // Filtrar planos duplicados/sobrelapados
+        List<ARPlane> validPlanes = FilterDuplicateVerticalPlanes(arPlaneManager.trackables);
+        
+        foreach (ARPlane plane in validPlanes)
         {
             if (!IsUsableVerticalPlane(plane, true))
             {
@@ -1065,7 +1086,17 @@ public class RoomColorManager : MonoBehaviour
         MeshRenderer renderer = overlay.AddComponent<MeshRenderer>();
         renderer.receiveShadows = false;
         renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        renderer.sharedMaterial = CreateARWallMaterial(detectedWallTint, detectedWallOverlayAlpha);
+        
+        // Crear material overlay (con manejo de null)
+        Material overlayMaterial = CreateARWallMaterial(detectedWallTint, detectedWallOverlayAlpha);
+        if (overlayMaterial != null)
+        {
+            renderer.sharedMaterial = overlayMaterial;
+        }
+        else
+        {
+            Debug.LogWarning("RoomColorManager: No se pudo crear material para overlay. Usando material default.");
+        }
 
         LineRenderer outline = overlay.AddComponent<LineRenderer>();
         ConfigureWallOutline(outline);
@@ -1156,52 +1187,6 @@ public class RoomColorManager : MonoBehaviour
         }
     }
 
-    private void UpdateVirtualWallMesh(MeshFilter meshFilter, LineRenderer outline)
-    {
-        if (meshFilter == null)
-        {
-            return;
-        }
-
-        float halfWidth = Mathf.Max(0.25f, minimumVisibleWallOverlayWidth * 0.5f);
-        float halfHeight = Mathf.Max(0.2f, minimumVisibleWallOverlayHeight * 0.5f);
-        Mesh mesh = meshFilter.sharedMesh;
-        if (mesh == null)
-        {
-            mesh = new Mesh();
-            mesh.name = "VirtualWallOverlayMesh";
-            meshFilter.sharedMesh = mesh;
-        }
-
-        mesh.Clear();
-        mesh.vertices = new[]
-        {
-            new Vector3(-halfWidth, -halfHeight, 0f),
-            new Vector3(halfWidth, -halfHeight, 0f),
-            new Vector3(-halfWidth, halfHeight, 0f),
-            new Vector3(halfWidth, halfHeight, 0f)
-        };
-        mesh.uv = new[]
-        {
-            new Vector2(0f, 0f),
-            new Vector2(1f, 0f),
-            new Vector2(0f, 1f),
-            new Vector2(1f, 1f)
-        };
-        mesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-
-        if (outline != null)
-        {
-            outline.positionCount = 4;
-            outline.SetPosition(0, mesh.vertices[0]);
-            outline.SetPosition(1, mesh.vertices[1]);
-            outline.SetPosition(2, mesh.vertices[3]);
-            outline.SetPosition(3, mesh.vertices[2]);
-        }
-    }
-
     private void ApplyColorToRenderer(Renderer wallRenderer, Color color)
     {
         if (wallRenderer == null)
@@ -1229,7 +1214,7 @@ public class RoomColorManager : MonoBehaviour
 
     private void UpdateSelectedWallVisuals()
     {
-        if (arWallOverlays.Count == 0 && virtualWallRenderer == null)
+        if (arWallOverlays.Count == 0)
         {
             return;
         }
@@ -1288,47 +1273,6 @@ public class RoomColorManager : MonoBehaviour
             }
         }
 
-        UpdateVirtualWallVisual();
-    }
-
-    private void UpdateVirtualWallVisual()
-    {
-        if (virtualWallRenderer == null)
-        {
-            return;
-        }
-
-        bool isSelected = selectedVirtualWallRenderer == virtualWallRenderer;
-        Color baseColor = hasVirtualWallColor ? virtualWallColor : detectedWallTint;
-        float alpha = hasVirtualWallColor ? arWallOverlayAlpha : detectedWallOverlayAlpha;
-        if (isSelected)
-        {
-            Color selectedColor = hasPendingWallColor ? pendingWallColor : baseColor;
-            alpha = selectedWallOverlayAlpha;
-            baseColor = Time.unscaledTime <= selectedWallBoostUntil
-                ? new Color(
-                    Mathf.Clamp01(selectedColor.r * selectedWallBoostMultiplier),
-                    Mathf.Clamp01(selectedColor.g * selectedWallBoostMultiplier),
-                    Mathf.Clamp01(selectedColor.b * selectedWallBoostMultiplier),
-                    alpha)
-                : selectedColor;
-        }
-
-        Color color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
-        ConfigureMaterialForColor(virtualWallRenderer.material, color, true);
-
-        if (virtualWallOutline != null)
-        {
-            virtualWallOutline.enabled = true;
-            virtualWallOutline.startWidth = isSelected ? 0.018f : 0.008f;
-            virtualWallOutline.endWidth = virtualWallOutline.startWidth;
-            virtualWallOutline.startColor = color;
-            virtualWallOutline.endColor = color;
-            if (virtualWallOutline.sharedMaterial != null)
-            {
-                ConfigureMaterialForColor(virtualWallOutline.sharedMaterial, color, true);
-            }
-        }
     }
 
     private void ConfigureWallOutline(LineRenderer outline)
@@ -1343,20 +1287,64 @@ public class RoomColorManager : MonoBehaviour
         outline.widthMultiplier = 1f;
         outline.numCornerVertices = 2;
         outline.numCapVertices = 2;
-        outline.sharedMaterial = CreateARWallMaterial(detectedWallTint, Mathf.Clamp01(detectedWallOverlayAlpha + 0.18f));
+        
+        Material outlineMaterial = CreateARWallMaterial(detectedWallTint, Mathf.Clamp01(detectedWallOverlayAlpha + 0.18f));
+        if (outlineMaterial != null)
+        {
+            outline.sharedMaterial = outlineMaterial;
+        }
     }
 
     private Material CreateARWallMaterial(Color color, float alpha)
     {
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        Shader shader = TryFindShader();
         if (shader == null)
         {
-            shader = Shader.Find("Unlit/Color");
+            // Fallback: intentar usar shader Standard de Unity
+            Debug.LogWarning("RoomColorManager: No se encontro shader adecuado. Intentando Standard...");
+            Shader standardShader = Shader.Find("Standard");
+            if (standardShader != null)
+            {
+                Material fallbackMaterial = new Material(standardShader);
+                ConfigureMaterialForColor(fallbackMaterial, new Color(color.r, color.g, color.b, alpha), true);
+                return fallbackMaterial;
+            }
+            
+            // Si ni siquiera Standard existe, devolver null
+            Debug.LogError("RoomColorManager: No se encontro ningun shader valido en el sistema.");
+            return null;
         }
 
         Material material = new Material(shader);
         ConfigureMaterialForColor(material, new Color(color.r, color.g, color.b, alpha), true);
         return material;
+    }
+    
+    private static Shader TryFindShader()
+    {
+        // Orden de busqueda: shaders modernos primero, luego fallbacks
+        string[] shaderNames = new string[]
+        {
+            "Universal Render Pipeline/Unlit",
+            "Universal Render Pipeline/Lit",
+            "Unlit/Color",
+            "Unlit/Texture",
+            "Sprites/Default",
+            "UI/Default",
+            "Hidden/Internal-Colored",
+            "Standard"
+        };
+        
+        foreach (string shaderName in shaderNames)
+        {
+            Shader shader = Shader.Find(shaderName);
+            if (shader != null)
+            {
+                return shader;
+            }
+        }
+        
+        return null;
     }
 
     private static void ConfigureMaterialForColor(Material material, Color color, bool transparent)
@@ -1372,21 +1360,36 @@ public class RoomColorManager : MonoBehaviour
         {
             material.SetColor("_BaseColor", color);
         }
+        else if (material.HasProperty("_Color"))
+        {
+            // Fallback para _Color si no existe _BaseColor
+            material.SetColor("_Color", color);
+        }
 
         if (!transparent)
         {
             return;
         }
 
-        SetFloatIfMaterialHasProperty(material, "_Surface", 1f);
-        SetFloatIfMaterialHasProperty(material, "_Blend", 0f);
-        SetFloatIfMaterialHasProperty(material, "_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        SetFloatIfMaterialHasProperty(material, "_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        SetFloatIfMaterialHasProperty(material, "_ZWrite", 0);
-        SetFloatIfMaterialHasProperty(material, "_Cull", (int)UnityEngine.Rendering.CullMode.Off);
-        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-        material.SetInt("_ZWrite", 0);
-        material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        try
+        {
+            SetFloatIfMaterialHasProperty(material, "_Surface", 1f);
+            SetFloatIfMaterialHasProperty(material, "_Blend", 0f);
+            SetFloatIfMaterialHasProperty(material, "_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SetFloatIfMaterialHasProperty(material, "_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            SetFloatIfMaterialHasProperty(material, "_ZWrite", 0);
+            SetFloatIfMaterialHasProperty(material, "_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+            
+            // Intentar habilitar keywords, pero no fallar si no existen
+            try { material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT"); } catch { }
+            
+            material.SetInt("_ZWrite", 0);
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("RoomColorManager: Error configurando material transparente: " + ex.Message);
+        }
     }
 
     private static bool IsARWallRenderer(Renderer renderer)
@@ -1394,54 +1397,6 @@ public class RoomColorManager : MonoBehaviour
         return renderer != null &&
             (renderer.GetComponentInParent<ARPlane>() != null ||
             renderer.gameObject.name == WallOverlayName);
-    }
-
-    private static bool TryGetRendererScreenRect(Camera camera, Renderer renderer, out Rect screenRect)
-    {
-        screenRect = default;
-        if (camera == null || renderer == null)
-        {
-            return false;
-        }
-
-        Bounds bounds = renderer.bounds;
-        Vector3 min = bounds.min;
-        Vector3 max = bounds.max;
-        Vector3[] corners =
-        {
-            new Vector3(min.x, min.y, min.z),
-            new Vector3(min.x, min.y, max.z),
-            new Vector3(min.x, max.y, min.z),
-            new Vector3(min.x, max.y, max.z),
-            new Vector3(max.x, min.y, min.z),
-            new Vector3(max.x, min.y, max.z),
-            new Vector3(max.x, max.y, min.z),
-            new Vector3(max.x, max.y, max.z)
-        };
-
-        bool hasVisibleCorner = false;
-        Vector2 rectMin = new Vector2(float.MaxValue, float.MaxValue);
-        Vector2 rectMax = new Vector2(float.MinValue, float.MinValue);
-        for (int i = 0; i < corners.Length; i++)
-        {
-            Vector3 screen = camera.WorldToScreenPoint(corners[i]);
-            if (screen.z <= 0f)
-            {
-                continue;
-            }
-
-            hasVisibleCorner = true;
-            rectMin = Vector2.Min(rectMin, screen);
-            rectMax = Vector2.Max(rectMax, screen);
-        }
-
-        if (!hasVisibleCorner)
-        {
-            return false;
-        }
-
-        screenRect = Rect.MinMaxRect(rectMin.x, rectMin.y, rectMax.x, rectMax.y);
-        return true;
     }
 
     private static void SetFloatIfMaterialHasProperty(Material material, string propertyName, float value)
@@ -1571,7 +1526,14 @@ public class RoomColorManager : MonoBehaviour
             return plane.normal.normalized;
         }
 
-        Vector3 transformNormal = plane.transform.up;
+        // Fallback: usar la matriz de transformación del plano (más confiable que solo transform.up)
+        Vector3 transformNormal = plane.transform.right;  // Para planos verticales, right es mejor que up
+        if (transformNormal.sqrMagnitude >= 0.0001f)
+        {
+            return transformNormal.normalized;
+        }
+        
+        transformNormal = plane.transform.up;
         return transformNormal.sqrMagnitude >= 0.0001f ? transformNormal.normalized : Vector3.zero;
     }
 
@@ -1583,34 +1545,9 @@ public class RoomColorManager : MonoBehaviour
         }
 
         float upDot = Mathf.Abs(Vector3.Dot(normal.normalized, Vector3.up));
-        return upDot <= 0.55f;
-    }
-
-    private ARPlane TryFindNearestVerticalPlane(Vector3 worldPoint, bool relaxedSize)
-    {
-        if (arPlaneManager == null)
-        {
-            return null;
-        }
-
-        ARPlane nearest = null;
-        float bestDistance = float.MaxValue;
-        foreach (ARPlane plane in arPlaneManager.trackables)
-        {
-            if (!IsUsableVerticalPlane(plane, relaxedSize))
-            {
-                continue;
-            }
-
-            float distance = Vector3.Distance(worldPoint, plane.center);
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                nearest = plane;
-            }
-        }
-
-        return nearest;
+        // Umbral más permisivo: tolera planos más inclinados (0.65 en lugar de 0.55)
+        // Esto permite detectar paredes que no sean perfectamente verticales
+        return upDot <= 0.65f;
     }
 
     private bool IsPlaneWithinSelectionDistance(Camera camera, ARPlane plane)

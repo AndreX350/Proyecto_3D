@@ -58,7 +58,6 @@ MonoBehaviour:
   selectedWallBoostMultiplier: 1.45
   minimumVisibleWallOverlayWidth: 0.5
   minimumVisibleWallOverlayHeight: 0.42
-  virtualWallFallbackDistance: 2.2
   requireExplicitApplyInAR: 1
   autoApplyPendingColorOnWallSelect: 1
   wallSelectionRetryAttempts: 6

@@ -14,7 +14,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Options.unity
     guid: c5a68c41c08546a9a1d88d4bef44f436
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/RoomDemo2.unity
     guid: c7b44b6e9d2342a6a9b43e441d22d001
   - enabled: 1
@@ -23,6 +23,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/SavedDesgins.unity
     guid: 35d79f5a74274e809be279e3f0b2f2ca
+  - enabled: 1
+    path: Assets/Scenes/RoomDemo.unity
+    guid: 0bdfe3d95d61d524bade447d433f41b6
   m_configObjects:
     UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: 76377b0a75cd9bb47a9d1039adbc758c,
       type: 2}
