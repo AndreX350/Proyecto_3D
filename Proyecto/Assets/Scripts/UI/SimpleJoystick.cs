@@ -33,8 +33,6 @@ public class SimpleJoystick : MonoBehaviour, IPointerDownHandler, IPointerUpHand
             background = transform as RectTransform;
         }
 
-        // El joystick debe quedar por encima de las zonas de look/otros panels
-        // para que reciba los eventos de pointer aunque exista UI transparente encima.
         transform.SetAsLastSibling();
 
         if (canvasGroup == null)

@@ -105,13 +105,13 @@ public class FurniturePlacementManager : MonoBehaviour
     private float roomFloorNormalDotThreshold = 0.55f;
 
     [SerializeField]
-    private float collisionBoundsShrink = 0.9f;
+    private float collisionBoundsShrink = 1f;
 
     [SerializeField]
     private float allowedContactPenetration = 0.01f;
 
     [SerializeField]
-    private float allowedWallPenetration = 0.0025f;
+    private float allowedWallPenetration = 0f;
 
     [SerializeField]
     private float rotateStepDegrees = 45f;
@@ -144,6 +144,9 @@ public class FurniturePlacementManager : MonoBehaviour
     private Vector2 pendingWallRetryPoint;
     private float pendingWallRetryTime;
     private int pendingWallRetryCount;
+    private float lastDoorTapTime;
+    private GameObject lastDoorTapped;
+    private const float DoubleTapThreshold = 0.35f;
     private ARPlane activeARDragPlane;
     private Pose activeARDragPose;
     private bool hasActiveARDragPose;
@@ -170,6 +173,7 @@ public class FurniturePlacementManager : MonoBehaviour
     private void Awake()
     {
         EnsurePlacedFurnitureLayerMask();
+        EnsureRoomObstacleLayerMask();
 
         if (placementCamera == null)
         {
@@ -191,13 +195,16 @@ public class FurniturePlacementManager : MonoBehaviour
             arAnchorManager = FindObjectOfType<ARAnchorManager>();
         }
 
-        ARSession arSession = FindObjectOfType<ARSession>();
-        if (arSession != null)
+        if (enableARPlacement)
         {
-            arSession.enabled = true;
-            arSession.requestedTrackingMode = TrackingMode.PositionAndRotation;
-            arSession.matchFrameRateRequested = true;
-            TrySetARSessionBool(arSession, "resetTrackingOnWake", false);
+            ARSession arSession = FindObjectOfType<ARSession>();
+            if (arSession != null)
+            {
+                arSession.enabled = true;
+                arSession.requestedTrackingMode = TrackingMode.PositionAndRotation;
+                arSession.matchFrameRateRequested = true;
+                TrySetARSessionBool(arSession, "resetTrackingOnWake", false);
+            }
         }
 
         if (roomColorManager == null)
@@ -414,8 +421,29 @@ public class FurniturePlacementManager : MonoBehaviour
             return;
         }
 
-        if (TrySelectPlacedFurnitureAtScreenPoint(screenPoint))
+        GameObject hitFurniture = GetPlacedFurnitureAtScreenPoint(screenPoint);
+        if (hitFurniture != null)
         {
+            SimpleDoorController door = hitFurniture.GetComponentInChildren<SimpleDoorController>();
+            if (door != null)
+            {
+                float timeSinceLastTap = Time.unscaledTime - lastDoorTapTime;
+                if (hitFurniture == lastDoorTapped && timeSinceLastTap < DoubleTapThreshold)
+                {
+                    lastDoorTapTime = 0f;
+                    lastDoorTapped = null;
+                    SetSelectedFurniture(hitFurniture);
+                    BeginSelectedFurnitureDrag();
+                    return;
+                }
+
+                lastDoorTapTime = Time.unscaledTime;
+                lastDoorTapped = hitFurniture;
+                door.ToggleDoor();
+                return;
+            }
+
+            SetSelectedFurniture(hitFurniture);
             BeginSelectedFurnitureDrag();
             return;
         }
@@ -514,7 +542,20 @@ public class FurniturePlacementManager : MonoBehaviour
         }
 
         Vector3 position = GetNextPlacementPosition() + item.placementOffset;
-        AddFurnitureInstance(item, position, Quaternion.Euler(0f, 180f, 0f), item.defaultScale);
+        GameObject instance = AddFurnitureInstance(item, position, Quaternion.Euler(0f, 180f, 0f), item.defaultScale);
+
+        if (preventPlacementOnCollision && instance != null)
+        {
+            float wallSeverity = GetWallCollisionSeverity(instance);
+            if (wallSeverity > allowedWallPenetration)
+            {
+                Debug.Log("Placement blocked: furniture collides with wall.");
+                DestroyPlacedFurniture(instance);
+                placedFurniture.Remove(instance);
+                if (lastPlacedFurniture == instance) lastPlacedFurniture = null;
+                return;
+            }
+        }
 
         Debug.Log("Placed furniture: " + item.itemName);
     }
@@ -640,21 +681,26 @@ public class FurniturePlacementManager : MonoBehaviour
         return instance;
     }
 
-    public bool TrySelectPlacedFurnitureAtScreenPoint(Vector2 screenPoint)
+    public GameObject GetPlacedFurnitureAtScreenPoint(Vector2 screenPoint)
     {
         Camera cam = placementCamera != null ? placementCamera : Camera.main;
         if (cam == null)
         {
-            return false;
+            return null;
         }
 
         Ray ray = cam.ScreenPointToRay(screenPoint);
         if (!Physics.Raycast(ray, out RaycastHit hit, 100f, placedFurnitureLayerMask))
         {
-            return false;
+            return null;
         }
 
-        GameObject placedRoot = GetPlacedFurnitureRoot(hit.transform);
+        return GetPlacedFurnitureRoot(hit.transform);
+    }
+
+    public bool TrySelectPlacedFurnitureAtScreenPoint(Vector2 screenPoint)
+    {
+        GameObject placedRoot = GetPlacedFurnitureAtScreenPoint(screenPoint);
         if (placedRoot == null)
         {
             return false;
@@ -703,6 +749,13 @@ public class FurniturePlacementManager : MonoBehaviour
         if (target == null)
         {
             Debug.LogWarning("FurniturePlacementManager: no furniture to rotate.");
+            return;
+        }
+
+        SimpleDoorController door = target.GetComponentInChildren<SimpleDoorController>();
+        if (door != null)
+        {
+            door.RotateDoor(rotateStepDegrees);
             return;
         }
 
@@ -777,7 +830,22 @@ public class FurniturePlacementManager : MonoBehaviour
 
     private Vector3 GetNextPlacementPosition()
     {
-        Vector3 basePosition = spawnPoint != null ? spawnPoint.position : fallbackSpawnPosition;
+        Camera cam = GetPlacementCamera();
+        Vector3 basePosition;
+
+        if (cam != null)
+        {
+            Transform playerTransform = cam.transform.parent ?? cam.transform;
+            Vector3 forward = playerTransform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f) forward = Vector3.forward;
+            basePosition = playerTransform.position + forward.normalized * 1.5f;
+        }
+        else
+        {
+            basePosition = spawnPoint != null ? spawnPoint.position : fallbackSpawnPosition;
+        }
+
         int safePlacementsPerRow = Mathf.Max(1, placementsPerRow);
         int activeCount = CountActivePlacedFurniture();
         int column = activeCount % safePlacementsPerRow;
@@ -849,7 +917,6 @@ public class FurniturePlacementManager : MonoBehaviour
 
         selectionVisual = new GameObject("SelectionVisual");
         selectionVisual.transform.SetParent(target.transform, false);
-        selectionVisual.transform.localPosition = new Vector3(0f, 0.02f, 0f);
 
         MeshFilter meshFilter = selectionVisual.AddComponent<MeshFilter>();
         MeshRenderer meshRenderer = selectionVisual.AddComponent<MeshRenderer>();
@@ -881,19 +948,32 @@ public class FurniturePlacementManager : MonoBehaviour
         mat.renderQueue = 3000;
         meshRenderer.material = mat;
 
-        Renderer targetRenderer = target.GetComponentInChildren<Renderer>();
-        if (targetRenderer != null)
+        Renderer[] allRenderers = target.GetComponentsInChildren<Renderer>(true);
+        bool hasBounds = false;
+        Bounds combinedBounds = default;
+        for (int i = 0; i < allRenderers.Length; i++)
         {
-            float size = Mathf.Max(targetRenderer.bounds.size.x, targetRenderer.bounds.size.z) * 1.0f;
+            if (allRenderers[i] == null || allRenderers[i].gameObject == selectionVisual) continue;
+            if (!hasBounds) { combinedBounds = allRenderers[i].bounds; hasBounds = true; }
+            else { combinedBounds.Encapsulate(allRenderers[i].bounds); }
+        }
+
+        if (hasBounds)
+        {
+            Vector3 localCenter = target.transform.InverseTransformPoint(combinedBounds.center);
+            selectionVisual.transform.localPosition = new Vector3(localCenter.x, localCenter.y + 0.02f, localCenter.z);
+
+            float size = Mathf.Max(combinedBounds.size.x, combinedBounds.size.z) * 1.0f;
             size = Mathf.Clamp(size, 0.5f, 2.5f);
-            Vector3 localScale = target.transform.lossyScale;
+            Vector3 lossyScale = target.transform.lossyScale;
             selectionVisual.transform.localScale = new Vector3(
-                Mathf.Abs(localScale.x) > 0.001f ? size / localScale.x : 1f,
+                Mathf.Abs(lossyScale.x) > 0.001f ? size / lossyScale.x : 1f,
                 1f,
-                Mathf.Abs(localScale.z) > 0.001f ? size / localScale.z : 1f);
+                Mathf.Abs(lossyScale.z) > 0.001f ? size / lossyScale.z : 1f);
         }
         else
         {
+            selectionVisual.transform.localPosition = new Vector3(0f, 0.02f, 0f);
             selectionVisual.transform.localScale = new Vector3(0.7f, 1f, 0.7f);
         }
     }
@@ -1828,6 +1908,15 @@ public class FurniturePlacementManager : MonoBehaviour
         placedFurnitureLayerMask.value |= 1 << placedLayer;
     }
 
+    private void EnsureRoomObstacleLayerMask()
+    {
+        int defaultLayer = 0;
+        if ((roomObstacleLayerMask.value & (1 << defaultLayer)) == 0)
+        {
+            roomObstacleLayerMask.value |= 1 << defaultLayer;
+        }
+    }
+
     private static void ApplyPlacedFurnitureLayer(GameObject instance)
     {
         int placedLayer = LayerMask.NameToLayer(PlacedFurnitureLayerName);
@@ -2042,18 +2131,14 @@ public class FurniturePlacementManager : MonoBehaviour
         if (preventPlacementOnCollision)
         {
             float newWallSeverity = GetWallCollisionSeverity(target);
-            bool blocksWall = newWallSeverity > allowedWallPenetration;
-            bool improvesWallCollision = newWallSeverity + 0.001f < previousWallSeverity;
-            if (blocksWall && !improvesWallCollision)
+            if (newWallSeverity > allowedWallPenetration)
             {
                 target.transform.position = previousPosition;
                 return false;
             }
 
             float newFurnitureSeverity = GetFurnitureCollisionSeverity(target);
-            bool blocksFurniture = newFurnitureSeverity > allowedContactPenetration;
-            bool improvesFurnitureCollision = newFurnitureSeverity + 0.0025f < previousFurnitureSeverity;
-            if (blocksFurniture && !improvesFurnitureCollision)
+            if (newFurnitureSeverity > allowedContactPenetration)
             {
                 target.transform.position = previousPosition;
                 return false;
